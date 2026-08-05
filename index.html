@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Multirepuestos del Llano</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div id="login-screen">
+    <div class="login-box">
+      <i class="ti ti-sparkles login-icon"></i>
+      <h1>Multirepuestos del Llano</h1>
+      <p>Sistema de inventario y ventas</p>
+      <label>Usuario</label>
+      <input type="text" id="login-user" placeholder="Tu usuario">
+      <label>Contraseña</label>
+      <input type="password" id="login-pass" placeholder="Tu contraseña">
+      <button id="btn-login">Ingresar</button>
+      <p id="login-error" class="hidden">Usuario o contraseña incorrectos</p>
+    </div>
+  </div>
+
+  <div id="app" class="hidden">
+
+    <div id="topbar">
+      <div id="topbar-left">
+        <i class="ti ti-sparkles"></i>
+        <div>
+          <span id="topbar-titulo">Multirepuestos del Llano</span>
+          <span id="topbar-sub">Inventario & Ventas</span>
+        </div>
+      </div>
+      <div id="topbar-right">
+        <span id="sync-status">Conectando...</span>
+        <span id="topbar-user"></span>
+        <button id="btn-logout">Salir</button>
+      </div>
+    </div>
+
+    <nav id="nav-tabs">
+      <button class="nav-tab active" data-tab="dashboard"><i class="ti ti-chart-bar"></i> Resumen</button>
+      <button class="nav-tab" data-tab="inventario"><i class="ti ti-package"></i> Inventario</button>
+      <button class="nav-tab" data-tab="ventas"><i class="ti ti-shopping-bag"></i> Vender</button>
+      <button class="nav-tab" data-tab="historial"><i class="ti ti-history"></i> Historial</button>
+      <button class="nav-tab" data-tab="reportes"><i class="ti ti-chart-pie"></i> Reportes</button>
+      <button class="nav-tab" data-tab="config"><i class="ti ti-settings"></i> Config</button>
+    </nav>
+
+    <main id="main-content">
+
+      <!-- DASHBOARD -->
+      <section id="panel-dashboard" class="panel active">
+        <p id="dash-fecha"></p>
+        <div id="dash-metrics"></div>
+        <div class="card">
+          <div class="section-header">
+            <h2>Ventas de hoy</h2>
+            <button class="btn-primary" data-goto="ventas">+ Nueva venta</button>
+          </div>
+          <div id="dash-ventas-hoy"></div>
+        </div>
+      </section>
+
+      <!-- INVENTARIO -->
+      <section id="panel-inventario" class="panel">
+        <div class="card">
+          <div class="section-header">
+            <h2>Inventario</h2>
+            <button class="btn-primary" id="btn-abrir-modal-producto">+ Agregar producto</button>
+          </div>
+          <input type="text" id="inv-search" placeholder="Buscar por nombre o referencia...">
+          <div id="inv-contenido"></div>
+        </div>
+      </section>
+
+      <!-- VENTAS -->
+      <section id="panel-ventas" class="panel">
+        <div class="card">
+          <div class="section-header">
+            <h2>Registrar venta</h2>
+          </div>
+
+          <!-- Buscador principal -->
+          <div id="venta-busqueda-box">
+            <input type="text" id="venta-search" placeholder="Buscar producto y presiona Enter...">
+            <div id="venta-resultados"></div>
+          </div>
+
+          <!-- Carrito -->
+          <div id="carrito"></div>
+
+          <!-- Footer con total y confirmar -->
+          <div id="venta-footer" class="hidden">
+            <div id="venta-total-box">
+              <span>Total venta</span>
+              <span id="vt-total">$0</span>
+            </div>
+            <div id="metodo-pago-box">
+              <p>Método de pago</p>
+              <div id="metodo-pago-opciones">
+                <label>
+                  <input type="radio" name="metodo-pago" value="efectivo" checked>
+                  💵 Efectivo
+                </label>
+                <label>
+                  <input type="radio" name="metodo-pago" value="transferencia">
+                  🏦 Transferencia
+                </label>
+              </div>
+            </div>
+            <input type="text" id="venta-nota" placeholder="Nota opcional (ej: cliente especial)">
+            <div id="venta-acciones">
+              <button id="btn-limpiar-carrito" class="btn-peligro">Limpiar</button>
+              <button class="btn-primary" id="btn-confirmar-venta">Confirmar venta</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- HISTORIAL -->
+      <section id="panel-historial" class="panel">
+        <div class="card">
+          <div class="section-header">
+            <h2>Historial de ventas</h2>
+            <input type="date" id="hist-fecha">
+          </div>
+          <div id="hist-summary"></div>
+          <div id="hist-contenido"></div>
+        </div>
+      </section>
+
+      <!-- REPORTES -->
+      <section id="panel-reportes" class="panel">
+        <div class="section-header">
+          <h2 style="font-family:var(--fuente-titulo);font-size:22px;color:var(--rosa-oscuro)">Reportes de ventas</h2>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn-reporte active" data-periodo="semana">Esta semana</button>
+            <button class="btn-reporte" data-periodo="mes">Este mes</button>
+            <button class="btn-reporte" data-periodo="año">Este año</button>
+          </div>
+        </div>
+
+        <!-- Métricas del periodo -->
+        <div id="reporte-metrics"></div>
+
+        <!-- Desglose pago -->
+        <div id="reporte-pago" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:1.5rem"></div>
+
+        <!-- Tabla de ventas del periodo -->
+        <div class="card">
+          <div class="section-header">
+            <h2 id="reporte-titulo-tabla">Ventas de la semana</h2>
+          </div>
+          <div id="reporte-contenido"></div>
+        </div>
+      </section>
+
+      <!-- CONFIG -->
+      <section id="panel-config" class="panel">
+        <div class="card">
+          <h2>Usuarios</h2>
+          <div id="usuarios-list"></div>
+          <div id="form-nuevo-usuario">
+            <input type="text" id="nu-user" placeholder="Usuario">
+            <input type="password" id="nu-pass" placeholder="Contraseña">
+            <select id="nu-rol">
+              <option value="vendedor">Vendedor</option>
+              <option value="admin">Administrador</option>
+            </select>
+            <button class="btn-primary" id="btn-agregar-usuario">Agregar usuario</button>
+          </div>
+        </div>
+        <div class="card">
+          <h2>Stock mínimo de alerta</h2>
+          <input type="number" id="conf-stock-min" placeholder="5" min="0">
+          <button class="btn-primary" id="btn-guardar-config">Guardar</button>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- MODAL: Agregar/Editar producto -->
+  <div id="modal-producto" class="modal-bg hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="modal-prod-titulo">Agregar producto</h3>
+        <button class="btn-cerrar-modal" data-modal="modal-producto">✕</button>
+      </div>
+      <input type="text" id="prod-ref" placeholder="Referencia / Código *">
+      <input type="text" id="prod-nombre" placeholder="Nombre del producto *">
+      <input type="number" id="prod-pcompra" placeholder="Precio de compra *">
+      <input type="number" id="prod-pventa1" placeholder="Precio de venta 1 (normal) *">
+      <input type="number" id="prod-pventa2" placeholder="Precio de venta 2 (especial)">
+      <input type="number" id="prod-stock" placeholder="Stock disponible *">
+      <div style="display:flex;gap:8px;margin-top:4px">
+        <button class="btn-cerrar-modal" data-modal="modal-producto" style="flex:1">Cancelar</button>
+        <button class="btn-primary" id="btn-guardar-producto" style="flex:1">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: PIN admin -->
+  <div id="modal-pin" class="modal-bg hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Solo administradores</h3>
+        <button class="btn-cerrar-modal" data-modal="modal-pin">✕</button>
+      </div>
+      <input type="password" id="pin-input" placeholder="Contraseña de administrador">
+      <p id="pin-error" class="hidden" style="color:#A32D2D;font-size:13px;margin-bottom:8px">Contraseña incorrecta</p>
+      <button class="btn-primary" id="btn-verificar-pin" style="width:100%">Verificar</button>
+    </div>
+  </div>
+
+  <!-- MODAL: Cambiar precio -->
+  <div id="modal-precio" class="modal-bg hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Precio de esta venta</h3>
+        <button class="btn-cerrar-modal" data-modal="modal-precio">✕</button>
+      </div>
+      <p id="mpv-nombre-producto" style="font-size:13px;color:var(--texto2);margin-bottom:1rem"></p>
+      <button id="mpv-btn-precio1" style="width:100%;margin-bottom:8px"></button>
+      <button id="mpv-btn-precio2" style="width:100%;margin-bottom:8px"></button>
+      <input type="number" id="mpv-precio-custom" placeholder="O escribe un precio personalizado">
+      <button class="btn-primary" id="btn-aplicar-precio" style="width:100%">Aplicar precio</button>
+    </div>
+  </div>
+
+  <!-- MODAL: Flujo rápido — cantidad y precio -->
+  <div id="modal-rapido" class="modal-bg hidden">
+    <div class="modal" style="max-width:360px">
+      <div class="modal-header">
+        <h3 id="rapido-nombre" style="font-size:16px"></h3>
+        <button class="btn-cerrar-modal" data-modal="modal-rapido">✕</button>
+      </div>
+
+      <!-- Paso 1: Cantidad -->
+      <div id="rapido-paso-cantidad">
+        <p style="font-size:13px;color:var(--texto2);margin-bottom:10px">¿Cuántas unidades?</p>
+        <input type="number" id="rapido-cantidad" min="1" value="1" style="font-size:22px;text-align:center;font-weight:600">
+        <p style="font-size:11px;color:var(--texto3);margin-top:4px;margin-bottom:12px">Presiona Enter para continuar</p>
+        <button class="btn-primary" id="btn-rapido-siguiente" style="width:100%">Siguiente → Precio</button>
+      </div>
+
+      <!-- Paso 2: Precio -->
+      <div id="rapido-paso-precio" class="hidden">
+        <p style="font-size:13px;color:var(--texto2);margin-bottom:12px">¿Con qué precio?</p>
+        <button id="rapido-btn-p1" class="btn-primary" style="width:100%;margin-bottom:8px;font-size:15px;padding:12px"></button>
+        <button id="rapido-btn-p2" class="btn-secundario" style="width:100%;margin-bottom:8px;font-size:15px;padding:12px"></button>
+        <div style="position:relative;margin-bottom:8px">
+          <input type="number" id="rapido-precio-custom" placeholder="Precio personalizado..." style="padding-right:120px">
+          <button class="btn-primary" id="rapido-btn-custom" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);padding:6px 12px;font-size:12px;border-radius:16px">Aplicar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Factura -->
+  <div id="modal-factura" class="modal-bg hidden">
+    <div class="modal" style="max-width:420px">
+      <div class="modal-header">
+        <h3>Detalle de venta</h3>
+        <button class="btn-cerrar-modal" data-modal="modal-factura">✕</button>
+      </div>
+      <div id="factura-contenido"></div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>
