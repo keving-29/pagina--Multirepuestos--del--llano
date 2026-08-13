@@ -1,16 +1,14 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
+<html lang="es"><head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Multirepuestos del Llano</title>
-  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600&amp;family=Inter:wght@300;400;500&amp;display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-  <div id="login-screen">
+  <div id="login-screen" class="hidden">
     <div class="login-box">
       <i class="ti ti-sparkles login-icon"></i>
       <h1>Multirepuestos del Llano</h1>
@@ -24,19 +22,19 @@
     </div>
   </div>
 
-  <div id="app" class="hidden">
+  <div id="app" class="">
 
     <div id="topbar">
       <div id="topbar-left">
         <i class="ti ti-sparkles"></i>
         <div>
           <span id="topbar-titulo">Multirepuestos del Llano</span>
-          <span id="topbar-sub">Inventario & Ventas</span>
+          <span id="topbar-sub">Inventario &amp; Ventas</span>
         </div>
       </div>
       <div id="topbar-right">
-        <span id="sync-status">Conectando...</span>
-        <span id="topbar-user"></span>
+        <span id="sync-status" class="conectado">Conectado</span>
+        <span id="topbar-user">KEVIN · admin</span>
         <button id="btn-logout">Salir</button>
       </div>
     </div>
@@ -55,14 +53,20 @@
 
       <!-- DASHBOARD -->
       <section id="panel-dashboard" class="panel active">
-        <p id="dash-fecha"></p>
-        <div id="dash-metrics"></div>
+        <p id="dash-fecha">Hoy · jueves, 13 de agosto de 2026</p>
+        <div id="dash-metrics">
+    <div class="metric rosa"><div class="mlabel">Total vendido hoy</div><div class="mvalue">$0</div></div>
+    <div class="metric"><div class="mlabel">Transacciones</div><div class="mvalue">0</div></div>
+    <div class="metric"><div class="mlabel">Productos</div><div class="mvalue">64</div></div>
+    <div class="metric alerta"><div class="mlabel">Stock bajo</div><div class="mvalue">48</div></div>
+    <div class="metric danger"><div class="mlabel">Sin stock</div><div class="mvalue">1</div></div>
+  </div>
         <div class="card">
           <div class="section-header">
             <h2>Ventas de hoy</h2>
             <button class="btn-primary" data-goto="ventas">+ Nueva venta</button>
           </div>
-          <div id="dash-ventas-hoy"></div>
+          <div id="dash-ventas-hoy"><div class="estado-vacio"><i class="ti ti-shopping-bag"></i><p>Sin ventas hoy. ¡A vender!</p></div></div>
         </div>
       </section>
 
@@ -104,7 +108,7 @@
               <p>Método de pago</p>
               <div id="metodo-pago-opciones">
                 <label>
-                  <input type="radio" name="metodo-pago" value="efectivo" checked>
+                  <input type="radio" name="metodo-pago" value="efectivo" checked="">
                   💵 Efectivo
                 </label>
                 <label>
@@ -163,6 +167,7 @@
         <div class="section-header">
           <h2 style="font-family:var(--fuente-titulo);font-size:22px;color:var(--rosa-oscuro)">Reportes de ventas</h2>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn-reporte" data-periodo="dia">Hoy</button>
             <button class="btn-reporte active" data-periodo="semana">Esta semana</button>
             <button class="btn-reporte" data-periodo="mes">Este mes</button>
             <button class="btn-reporte" data-periodo="año">Este año</button>
@@ -294,6 +299,7 @@
         <button class="btn-cerrar-modal" data-modal="modal-factura">✕</button>
       </div>
       <div id="factura-contenido"></div>
+      <button class="btn-primary" id="btn-imprimir-boucher" style="width:100%;margin-top:12px"><i class="ti ti-printer"></i> Imprimir boucher</button>
     </div>
   </div>
 
@@ -316,7 +322,12 @@
     <div id="traslado-print-contenido"></div>
   </div>
 
-  <div id="toast"></div>
+  <!-- IMPRESIÓN: Boucher de venta -->
+  <div id="venta-print">
+    <div id="venta-print-contenido"></div>
+  </div>
+
+  <div id="toast" class="">Datos sincronizados ✓</div>
   <script src="app.js"></script>
-</body>
-</html>
+
+</body></html>

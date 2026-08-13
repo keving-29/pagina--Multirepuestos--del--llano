@@ -10,7 +10,7 @@ let DB = {
   usuarios:  [],
   productos: [],
   ventas:    [],
-  config:    { stockMin: 5 }
+  config:    { stockMin: 5, trasladoContador: 0 }
 };
 
 let sesion              = null;
@@ -22,6 +22,12 @@ let rapidoProductoActual = null;
 let periodoreporte      = 'semana';
 let traslado             = [];
 let trasladoProductoActual = null;
+let facturaVentaActual  = null;
+let autoSyncInterval    = null;
+let resultadosVenta     = [];
+let indiceVenta         = 0;
+let resultadosTraslado  = [];
+let indiceTraslado      = 0;
 
 // =============================================
 // GOOGLE SHEETS
@@ -30,6 +36,7 @@ async function sheetsLeer() {
   try {
     setSyncStatus('cargando');
     const r = await fetch(SCRIPT_URL + '?action=getAll');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
     const d = await r.json();
     setSyncStatus('conectado');
     return d.data || {};
@@ -42,10 +49,11 @@ async function sheetsLeer() {
 async function sheetsEscribir(accion, hoja, datos, fila) {
   try {
     setSyncStatus('cargando');
-    await fetch(SCRIPT_URL, {
+    const r = await fetch(SCRIPT_URL, {
       method: 'POST',
       body: JSON.stringify({ action: accion, sheet: hoja, data: datos, row: fila })
     });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
     setSyncStatus('conectado');
     return true;
   } catch (e) {
@@ -83,6 +91,7 @@ async function sincronizar() {
 
   if (datos.Config && datos.Config.length > 1) {
     DB.config.stockMin = Number(datos.Config[1][0]) || 5;
+    DB.config.trasladoContador = Number(datos.Config[1][1]) || 0;
   }
 
   guardarLocal();
@@ -101,8 +110,8 @@ async function inicializarSheets() {
     await sheetsEscribir('append', 'Usuarios', ['admin','lubin2812','admin']);
   }
   if (!datos.Config || datos.Config.length === 0) {
-    await sheetsEscribir('append', 'Config', ['StockMin']);
-    await sheetsEscribir('append', 'Config', [5]);
+    await sheetsEscribir('append', 'Config', ['StockMin','TrasladoContador']);
+    await sheetsEscribir('append', 'Config', [5, 0]);
   }
   await sincronizar();
 }
@@ -130,6 +139,24 @@ function esc(t) {
     ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 function parsearJSON(t) { try { return JSON.parse(t); } catch(e) { return []; } }
+
+// Fecha y hora en formato colombiano (DD/MM/AAAA, 12 horas)
+function fechaCO(d = new Date()) {
+  const dd = String(d.getDate()).padStart(2,'0');
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  return `${dd}/${mm}/${d.getFullYear()}`;
+}
+function horaCO(d = new Date()) {
+  return d.toLocaleTimeString('es-CO', {hour:'2-digit', minute:'2-digit', hour12:true});
+}
+function parseFechaCO(str) {
+  const [dd,mm,yyyy] = String(str).split('/').map(Number);
+  return new Date(yyyy||1970, (mm||1)-1, dd||1);
+}
+function isoAFechaCO(iso) {
+  const [y,m,d] = String(iso).split('-');
+  return `${d}/${m}/${y}`;
+}
 
 function setSyncStatus(estado) {
   const el = document.getElementById('sync-status');
@@ -171,10 +198,17 @@ function entrarAlApp() {
   document.getElementById('topbar-user').textContent = sesion.user + ' · ' + sesion.rol;
   document.getElementById('hist-fecha').value = new Date().toISOString().split('T')[0];
   mostrarPanel('dashboard');
+  iniciarAutoSync();
+}
+
+function iniciarAutoSync() {
+  if (autoSyncInterval) clearInterval(autoSyncInterval);
+  autoSyncInterval = setInterval(() => { if (sesion) sincronizar(); }, 60000);
 }
 
 function doLogout() {
   sesion = null; precioCompraVisible = false; carrito = [];
+  if (autoSyncInterval) { clearInterval(autoSyncInterval); autoSyncInterval = null; }
   borrarSesion();
   document.getElementById('app').classList.add('hidden');
   document.getElementById('login-screen').classList.remove('hidden');
@@ -202,12 +236,14 @@ function mostrarPanel(panel) {
     renderCarrito();
     document.getElementById('venta-search').value = '';
     document.getElementById('venta-resultados').innerHTML = '';
+    resultadosVenta = [];
     setTimeout(() => document.getElementById('venta-search').focus(), 100);
   }
   if (panel === 'traslado') {
     renderTraslado();
     document.getElementById('traslado-search').value = '';
     document.getElementById('traslado-resultados').innerHTML = '';
+    resultadosTraslado = [];
     setTimeout(() => document.getElementById('traslado-search').focus(), 100);
   }
 }
@@ -218,25 +254,31 @@ function mostrarPanel(panel) {
 function buscarProductoTraslado() {
   const q = document.getElementById('traslado-search').value.toLowerCase();
   const cont = document.getElementById('traslado-resultados');
-  if (!q) { cont.innerHTML=''; return; }
+  indiceTraslado = 0;
+  if (!q) { cont.innerHTML=''; resultadosTraslado=[]; return; }
 
-  const res = DB.productos
+  resultadosTraslado = DB.productos
     .filter(p => p.nombre.toLowerCase().includes(q) || p.ref.toLowerCase().includes(q))
     .slice(0,8);
 
-  if (res.length===0) { cont.innerHTML='<p style="font-size:13px;color:var(--texto2);padding:8px 0">Sin resultados</p>'; return; }
+  if (resultadosTraslado.length===0) { cont.innerHTML='<p style="font-size:13px;color:var(--texto2);padding:8px 0">Sin resultados</p>'; return; }
 
+  renderResultadosTraslado();
+}
+
+function renderResultadosTraslado() {
+  const cont = document.getElementById('traslado-resultados');
   cont.innerHTML = `
     <div style="background:var(--card);border:0.5px solid var(--borde);border-radius:12px;overflow:hidden;margin-bottom:1rem;box-shadow:var(--sombra)">
       <div style="padding:8px 12px;background:var(--blush-claro);border-bottom:0.5px solid var(--borde);font-size:11px;color:var(--texto2);font-weight:500;text-transform:uppercase;letter-spacing:0.5px">
-        Resultados — Enter para agregar el primero
+        Resultados — ↑↓ para navegar, Enter para agregar
       </div>
-      ${res.map((p,i) => `
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:0.5px solid var(--borde);flex-wrap:wrap;gap:8px;${i===0?'background:var(--rosa-claro)':''}">
+      ${resultadosTraslado.map((p,i) => `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:0.5px solid var(--borde);flex-wrap:wrap;gap:8px;${i===indiceTraslado?'background:var(--rosa-claro)':''}">
           <div>
-            ${i===0?'<span style="font-size:10px;background:var(--rosa);color:#fff;padding:2px 7px;border-radius:10px;margin-right:6px">↵ Enter</span>':''}
+            ${i===indiceTraslado?'<span style="font-size:10px;background:var(--rosa);color:#fff;padding:2px 7px;border-radius:10px;margin-right:6px">↵ Enter</span>':''}
             <span style="font-size:14px;font-weight:500">${esc(p.nombre)}</span>
-            <div style="font-size:12px;color:var(--texto2)">Código: ${esc(p.ref)} · P1: ${fmt(p.pventa1)}</div>
+            <div style="font-size:12px;color:var(--texto2)">Código: ${esc(p.ref)} · Stock: ${p.stock} · P1: ${fmt(p.pventa1)}</div>
           </div>
           <button class="btn-primary btn-agregar-traslado" data-id="${p.id}" style="flex-shrink:0"><i class="ti ti-plus"></i> Agregar</button>
         </div>`).join('')}
@@ -259,11 +301,18 @@ function agregarATraslado(id) {
   document.getElementById('traslado-resultados').innerHTML = '';
 }
 
+function cantidadEnTraslado(ref) {
+  return traslado.filter(i => i.codigo === ref).reduce((a,i) => a+i.cantidad, 0);
+}
+
 function confirmarCantidadTraslado() {
   const cant = parseInt(document.getElementById('ct-cantidad').value) || 0;
   if (cant < 1) { alert('Ingresa una cantidad válida'); return; }
   const p = trasladoProductoActual;
   if (!p) return;
+
+  const disponible = p.stock - cantidadEnTraslado(p.ref);
+  if (cant > disponible) { alert(`Solo hay ${Math.max(disponible,0)} unidades disponibles en inventario.`); return; }
 
   traslado.push({ itemId: uid(), codigo: p.ref, nombre: p.nombre, cantidad: cant, precio: p.pventa1 });
   cerrarModal('modal-cantidad-traslado');
@@ -304,12 +353,32 @@ function renderTraslado() {
     b.addEventListener('click', () => eliminarDeTraslado(b.dataset.id)));
 }
 
-function imprimirTraslado() {
+async function guardarConfigSheet() {
+  await sheetsEscribir('clear','Config',null,null);
+  await sheetsEscribir('append','Config',['StockMin','TrasladoContador']);
+  await sheetsEscribir('append','Config',[DB.config.stockMin, DB.config.trasladoContador]);
+}
+
+async function siguienteNumeroTraslado() {
+  DB.config.trasladoContador = (DB.config.trasladoContador||0) + 1;
+  guardarLocal();
+  await guardarConfigSheet();
+  return 'TD-N-' + String(DB.config.trasladoContador).padStart(4,'0');
+}
+
+function prepararImpresion(idContenedor) {
+  document.getElementById('traslado-print').classList.remove('activo');
+  document.getElementById('venta-print').classList.remove('activo');
+  document.getElementById(idContenedor).classList.add('activo');
+}
+
+async function imprimirTraslado() {
   if (traslado.length === 0) { alert('Agrega productos al traslado antes de imprimir'); return; }
 
+  const numero = await siguienteNumeroTraslado();
   const ahora = new Date();
-  const fecha = ahora.toLocaleDateString('es-CO', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
-  const hora  = ahora.toLocaleTimeString('es-CO');
+  const fecha = fechaCO(ahora);
+  const hora  = horaCO(ahora);
 
   const filas = traslado.map((i, idx) => `
     <tr>
@@ -324,6 +393,7 @@ function imprimirTraslado() {
     <div id="tp-header">
       <h1>Multirepuestos del Llano</h1>
       <p>Traslado de productos</p>
+      <p style="font-weight:600;margin-top:4px">${numero}</p>
     </div>
     <div id="tp-meta">
       <span><strong>Fecha:</strong> ${fecha}</span>
@@ -340,6 +410,7 @@ function imprimirTraslado() {
     </div>
   `;
 
+  prepararImpresion('traslado-print');
   window.print();
 }
 
@@ -347,10 +418,9 @@ function imprimirTraslado() {
 // DASHBOARD
 // =============================================
 function renderDashboard() {
-  const hoy = new Date().toISOString().split('T')[0];
+  const hoy = fechaCO();
   const ventasHoy = DB.ventas.filter(v => v.fecha === hoy);
   const totalVendido  = ventasHoy.reduce((a,v) => a+v.total, 0);
-  const totalGanancia = ventasHoy.reduce((a,v) => a+v.ganancia, 0);
   const sinStock  = DB.productos.filter(p => p.stock <= 0).length;
   const stockBajo = DB.productos.filter(p => p.stock > 0 && p.stock <= DB.config.stockMin).length;
 
@@ -358,7 +428,6 @@ function renderDashboard() {
 
   document.getElementById('dash-metrics').innerHTML = `
     <div class="metric rosa"><div class="mlabel">Total vendido hoy</div><div class="mvalue">${fmt(totalVendido)}</div></div>
-    <div class="metric rosa"><div class="mlabel">Ganancia del día</div><div class="mvalue">${fmt(totalGanancia)}</div></div>
     <div class="metric"><div class="mlabel">Transacciones</div><div class="mvalue">${ventasHoy.length}</div></div>
     <div class="metric"><div class="mlabel">Productos</div><div class="mvalue">${DB.productos.length}</div></div>
     ${stockBajo>0?`<div class="metric alerta"><div class="mlabel">Stock bajo</div><div class="mvalue">${stockBajo}</div></div>`:''}
@@ -397,6 +466,7 @@ function renderDashboard() {
 // FACTURA
 // =============================================
 function abrirFactura(venta) {
+  facturaVentaActual = venta;
   const metodoBadge = venta.metodoPago === 'transferencia'
     ? '<span class="badge rosa">🏦 Transferencia</span>'
     : '<span class="badge verde">💵 Efectivo</span>';
@@ -435,6 +505,41 @@ function abrirFactura(venta) {
     <div style="text-align:center;margin-top:1.5rem;padding-top:1rem;border-top:0.5px solid var(--borde);font-size:12px;color:var(--texto3)">¡Gracias por tu compra! 🌸</div>
   `;
   abrirModal('modal-factura');
+}
+
+// Boucher de impresión — no muestra ganancias
+function imprimirBoucher(venta) {
+  const metodoTexto = venta.metodoPago === 'transferencia' ? 'Transferencia' : 'Efectivo';
+
+  const filas = venta.items.map(i => `
+    <tr>
+      <td>${esc(i.nombre)}</td>
+      <td style="text-align:center">${i.cantidad}</td>
+      <td style="text-align:right">${fmt(i.precio)}</td>
+      <td style="text-align:right">${fmt(i.total)}</td>
+    </tr>`).join('');
+
+  document.getElementById('venta-print-contenido').innerHTML = `
+    <div id="tp-header">
+      <h1>Multirepuestos del Llano</h1>
+      <p>Comprobante de venta</p>
+    </div>
+    <div id="tp-meta">
+      <span><strong>Fecha:</strong> ${venta.fecha}</span>
+      <span><strong>Hora:</strong> ${venta.hora}</span>
+    </div>
+    ${venta.nota?`<p style="font-size:13px;margin-bottom:10px"><strong>Nota:</strong> ${esc(venta.nota)}</p>`:''}
+    <table>
+      <thead><tr><th>Producto</th><th>Cant.</th><th>Precio</th><th>Subtotal</th></tr></thead>
+      <tbody>${filas}</tbody>
+    </table>
+    <p style="margin-top:12px;font-size:14px;text-align:right"><strong>Total: ${fmt(venta.total)}</strong></p>
+    <p style="margin-top:4px;font-size:12px;text-align:right">Método de pago: ${metodoTexto}</p>
+    <p style="text-align:center;margin-top:20px;font-size:12px">¡Gracias por tu compra!</p>
+  `;
+
+  prepararImpresion('venta-print');
+  window.print();
 }
 
 // =============================================
@@ -554,23 +659,29 @@ function verificarPin() {
 function buscarProductoVenta() {
   const q = document.getElementById('venta-search').value.toLowerCase();
   const cont = document.getElementById('venta-resultados');
-  if (!q) { cont.innerHTML=''; return; }
+  indiceVenta = 0;
+  if (!q) { cont.innerHTML=''; resultadosVenta=[]; return; }
 
-  const res = DB.productos
+  resultadosVenta = DB.productos
     .filter(p => (p.nombre.toLowerCase().includes(q)||p.ref.toLowerCase().includes(q)) && p.stock>0)
     .slice(0,8);
 
-  if (res.length===0) { cont.innerHTML='<p style="font-size:13px;color:var(--texto2);padding:8px 0">Sin resultados con stock disponible</p>'; return; }
+  if (resultadosVenta.length===0) { cont.innerHTML='<p style="font-size:13px;color:var(--texto2);padding:8px 0">Sin resultados con stock disponible</p>'; return; }
 
+  renderResultadosVenta();
+}
+
+function renderResultadosVenta() {
+  const cont = document.getElementById('venta-resultados');
   cont.innerHTML = `
     <div style="background:var(--card);border:0.5px solid var(--borde);border-radius:12px;overflow:hidden;margin-bottom:1rem;box-shadow:0 4px 16px rgba(194,105,143,0.12)">
       <div style="padding:8px 12px;background:var(--blush-claro);border-bottom:0.5px solid var(--borde);font-size:11px;color:var(--texto2);font-weight:500;text-transform:uppercase;letter-spacing:0.5px">
-        Resultados — Enter para seleccionar el primero
+        Resultados — ↑↓ para navegar, Enter para seleccionar
       </div>
-      ${res.map((p,i) => `
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:0.5px solid var(--borde);flex-wrap:wrap;gap:8px;${i===0?'background:var(--rosa-claro)':''}">
+      ${resultadosVenta.map((p,i) => `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:0.5px solid var(--borde);flex-wrap:wrap;gap:8px;${i===indiceVenta?'background:var(--rosa-claro)':''}">
           <div>
-            ${i===0?'<span style="font-size:10px;background:var(--rosa);color:#fff;padding:2px 7px;border-radius:10px;margin-right:6px">↵ Enter</span>':''}
+            ${i===indiceVenta?'<span style="font-size:10px;background:var(--rosa);color:#fff;padding:2px 7px;border-radius:10px;margin-right:6px">↵ Enter</span>':''}
             <span style="font-size:14px;font-weight:500">${esc(p.nombre)}</span>
             <div style="font-size:12px;color:var(--texto2)">Ref: ${esc(p.ref)} · Stock: ${p.stock} · P1: ${fmt(p.pventa1)}${p.pventa2?' · P2: '+fmt(p.pventa2):''}</div>
           </div>
@@ -599,6 +710,7 @@ function abrirFlujRapido(id) {
   // Limpiar búsqueda al abrir
   document.getElementById('venta-search').value = '';
   document.getElementById('venta-resultados').innerHTML = '';
+  resultadosVenta = [];
 }
 
 // Paso 2: mostrar precios
@@ -607,6 +719,12 @@ function rapidoMostrarPrecio() {
   if (cant < 1) return;
 
   const p = rapidoProductoActual;
+  const disponible = p.stock - cantidadEnCarrito(p.id);
+  if (cant > disponible) {
+    alert(`Solo hay ${Math.max(disponible,0)} unidades disponibles de este producto.`);
+    return;
+  }
+
   document.getElementById('rapido-paso-cantidad').classList.add('hidden');
   document.getElementById('rapido-paso-precio').classList.remove('hidden');
 
@@ -628,12 +746,16 @@ function rapidoMostrarPrecio() {
   setTimeout(() => document.getElementById('rapido-btn-p1').focus(), 100);
 }
 
+function cantidadEnCarrito(id) {
+  return carrito.filter(i => i.id===id).reduce((a,i) => a+i.cantidad, 0);
+}
+
 // Agregar al carrito desde flujo rápido
 function rapidoAgregarConPrecio(precio) {
   const p = rapidoProductoActual;
   const cant = parseInt(document.getElementById('rapido-cantidad').value)||1;
 
-  const yaEsta = carrito.find(i => i.id===p.id);
+  const yaEsta = carrito.find(i => i.id===p.id && i.precio===precio);
   if (yaEsta) {
     yaEsta.cantidad += cant;
     yaEsta.total = yaEsta.cantidad * yaEsta.precio;
@@ -685,8 +807,17 @@ function renderCarrito() {
   cont.querySelectorAll('.input-cantidad-carrito').forEach(input => {
     input.addEventListener('change', () => {
       const idx = parseInt(input.dataset.idx);
-      carrito[idx].cantidad = Math.max(1, parseInt(input.value)||1);
-      carrito[idx].total = carrito[idx].cantidad * carrito[idx].precio;
+      const item = carrito[idx];
+      const p = DB.productos.find(x=>x.id===item.id);
+      const otras = carrito.filter((i,ix)=>ix!==idx && i.id===item.id).reduce((a,i)=>a+i.cantidad,0);
+      const disponible = p ? p.stock - otras : Infinity;
+      let nuevaCant = Math.max(1, parseInt(input.value)||1);
+      if (nuevaCant > disponible) {
+        alert(`Solo hay ${Math.max(disponible,0)} unidades disponibles de este producto.`);
+        nuevaCant = disponible > 0 ? disponible : 1;
+      }
+      item.cantidad = nuevaCant;
+      item.total = item.cantidad * item.precio;
       renderCarrito();
     });
   });
@@ -709,6 +840,7 @@ function abrirModalPrecio(idx) {
   b2.disabled = !item.pventa2; b2.className='btn-secundario';
   document.getElementById('mpv-precio-custom').value='';
   abrirModal('modal-precio');
+  setTimeout(() => document.getElementById('mpv-btn-precio1').focus(), 100);
 }
 
 function seleccionarPrecio(n) {
@@ -729,8 +861,8 @@ function aplicarPrecioCustom() {
 async function confirmarVenta() {
   if (carrito.length===0) return;
   const ahora=new Date();
-  const fecha=ahora.toISOString().split('T')[0];
-  const hora=ahora.toTimeString().slice(0,5);
+  const fecha=fechaCO(ahora);
+  const hora=horaCO(ahora);
   const total=carrito.reduce((a,i)=>a+i.total,0);
   const ganancia=carrito.reduce((a,i)=>a+(i.precio-i.pcompra)*i.cantidad,0);
   const nota=document.getElementById('venta-nota').value.trim();
@@ -750,13 +882,16 @@ async function confirmarVenta() {
   await sheetsEscribir('append','Ventas',[venta.id,venta.fecha,venta.hora,venta.total,venta.ganancia,venta.nota,venta.metodoPago,JSON.stringify(venta.items)]);
 
   guardarLocal();
+  mostrarToast(`Venta registrada · ${metodoPago==='transferencia'?'🏦':'💵'} ${fmt(total)}`);
+  imprimirBoucher(venta);
+
   carrito=[];
   renderCarrito();
   document.getElementById('venta-search').value='';
   document.getElementById('venta-resultados').innerHTML='';
+  resultadosVenta=[];
   document.getElementById('venta-nota').value='';
   document.querySelector('input[name="metodo-pago"][value="efectivo"]').checked=true;
-  mostrarToast(`Venta registrada · ${metodoPago==='transferencia'?'🏦':'💵'} ${fmt(total)}`);
   setTimeout(()=>document.getElementById('venta-search').focus(),150);
 }
 
@@ -764,7 +899,8 @@ async function confirmarVenta() {
 // HISTORIAL
 // =============================================
 function renderHistorial() {
-  const fecha=document.getElementById('hist-fecha').value;
+  const fechaISO=document.getElementById('hist-fecha').value;
+  const fecha=isoAFechaCO(fechaISO);
   const ventas=DB.ventas.filter(v=>v.fecha===fecha).slice().reverse();
   const summary=document.getElementById('hist-summary');
   const cont=document.getElementById('hist-contenido');
@@ -829,7 +965,10 @@ function getRangoPeriodo(periodo) {
   const hoy = new Date();
   let desde, hasta;
 
-  if (periodo === 'semana') {
+  if (periodo === 'dia') {
+    desde = new Date(hoy); desde.setHours(0,0,0,0);
+    hasta = new Date(hoy); hasta.setHours(23,59,59,999);
+  } else if (periodo === 'semana') {
     // Lunes de esta semana
     const dia = hoy.getDay();
     const diff = dia === 0 ? -6 : 1 - dia;
@@ -856,7 +995,7 @@ function renderReportes(periodo) {
 
   const { desde, hasta } = getRangoPeriodo(periodo);
   const ventas = DB.ventas.filter(v => {
-    const d = new Date(v.fecha + 'T00:00:00');
+    const d = parseFechaCO(v.fecha);
     return d >= desde && d <= hasta;
   });
 
@@ -867,8 +1006,8 @@ function renderReportes(periodo) {
   const ganEfectivo    = ventas.filter(v=>v.metodoPago!=='transferencia').reduce((a,v)=>a+v.ganancia,0);
   const ganTransf      = ventas.filter(v=>v.metodoPago==='transferencia').reduce((a,v)=>a+v.ganancia,0);
 
-  const labels = { semana:'esta semana', mes:'este mes', año:'este año' };
-  const tituloTabla = { semana:'Ventas de la semana', mes:'Ventas del mes', año:'Ventas del año' };
+  const labels = { dia:'hoy', semana:'esta semana', mes:'este mes', año:'este año' };
+  const tituloTabla = { dia:'Ventas de hoy', semana:'Ventas de la semana', mes:'Ventas del mes', año:'Ventas del año' };
 
   // Métricas principales
   document.getElementById('reporte-metrics').innerHTML = `
@@ -969,10 +1108,40 @@ function eliminarUsuario(idx) {
 async function guardarConfig() {
   DB.config.stockMin=parseInt(document.getElementById('conf-stock-min').value)||5;
   guardarLocal();
-  await sheetsEscribir('clear','Config',null,null);
-  await sheetsEscribir('append','Config',['StockMin']);
-  await sheetsEscribir('append','Config',[DB.config.stockMin]);
+  await guardarConfigSheet();
   mostrarToast('Configuración guardada ✓');
+}
+
+// =============================================
+// NAVEGACIÓN CON TECLADO
+// =============================================
+// Permite moverse con ↑/↓ entre botones/campos de un contenedor (Enter ya activa el botón enfocado)
+function habilitarNavegacionFlechas(contenedorId) {
+  const contenedor = document.getElementById(contenedorId);
+  contenedor.addEventListener('keydown', e => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    const focusables = Array.from(contenedor.querySelectorAll('button:not([disabled]), input'))
+      .filter(el => el.offsetParent !== null);
+    if (focusables.length === 0) return;
+    const idx = focusables.indexOf(document.activeElement);
+    e.preventDefault();
+    if (idx === -1) { focusables[0].focus(); return; }
+    const next = e.key === 'ArrowDown' ? idx + 1 : idx - 1;
+    focusables[Math.max(0, Math.min(focusables.length - 1, next))].focus();
+  });
+}
+
+// Enter avanza al siguiente campo del formulario; en el último, ejecuta onFinal
+function habilitarEnterAvanza(ids, onFinal) {
+  ids.forEach((id, i) => {
+    document.getElementById(id).addEventListener('keydown', e => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const siguiente = ids[i+1];
+      if (siguiente) document.getElementById(siguiente).focus();
+      else onFinal();
+    });
+  });
 }
 
 // =============================================
@@ -981,6 +1150,7 @@ async function guardarConfig() {
 document.addEventListener('DOMContentLoaded', () => {
   cargarLocal();
   if (DB.usuarios.length===0) DB.usuarios=[{user:'admin',pass:'lubin2812',rol:'admin'}];
+  if (DB.config.trasladoContador === undefined) DB.config.trasladoContador = 0;
 
   // Sesión persistente
   const sesionGuardada = cargarSesion();
@@ -1008,19 +1178,34 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-abrir-modal-producto').addEventListener('click',()=>abrirModalProducto(null));
   document.getElementById('btn-guardar-producto').addEventListener('click', guardarProducto);
   document.getElementById('inv-search').addEventListener('input', renderInventario);
+  habilitarEnterAvanza(['prod-ref','prod-nombre','prod-pcompra','prod-pventa1','prod-pventa2','prod-stock'], guardarProducto);
+
+  // Factura / boucher
+  document.getElementById('btn-imprimir-boucher').addEventListener('click', () => {
+    if (facturaVentaActual) imprimirBoucher(facturaVentaActual);
+  });
 
   // PIN
   document.getElementById('btn-verificar-pin').addEventListener('click', verificarPin);
   document.getElementById('pin-input').addEventListener('keydown',e=>{ if(e.key==='Enter') verificarPin(); });
 
-  // Ventas — búsqueda con Enter
+  // Ventas — búsqueda con flechas y Enter
   const ventaSearch = document.getElementById('venta-search');
   ventaSearch.addEventListener('input', buscarProductoVenta);
   ventaSearch.addEventListener('keydown', e => {
-    if (e.key === 'Enter') {
-      // Selecciona el primer resultado automáticamente
-      const primer = document.querySelector('.btn-agregar-rapido');
-      if (primer) primer.click();
+    if (resultadosVenta.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      indiceVenta = Math.min(indiceVenta + 1, resultadosVenta.length - 1);
+      renderResultadosVenta();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      indiceVenta = Math.max(indiceVenta - 1, 0);
+      renderResultadosVenta();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const p = resultadosVenta[indiceVenta];
+      if (p) abrirFlujRapido(p.id);
     }
   });
 
@@ -1031,6 +1216,8 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('mpv-btn-precio1').addEventListener('click',()=>seleccionarPrecio(1));
   document.getElementById('mpv-btn-precio2').addEventListener('click',()=>seleccionarPrecio(2));
   document.getElementById('btn-aplicar-precio').addEventListener('click', aplicarPrecioCustom);
+  habilitarNavegacionFlechas('modal-precio');
+  habilitarNavegacionFlechas('modal-rapido');
 
   // Flujo rápido — cantidad
   document.getElementById('btn-rapido-siguiente').addEventListener('click', rapidoMostrarPrecio);
@@ -1055,13 +1242,23 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Traslado — búsqueda con Enter
+  // Traslado — búsqueda con flechas y Enter
   const trasladoSearch = document.getElementById('traslado-search');
   trasladoSearch.addEventListener('input', buscarProductoTraslado);
   trasladoSearch.addEventListener('keydown', e => {
-    if (e.key === 'Enter') {
-      const primer = document.querySelector('.btn-agregar-traslado');
-      if (primer) primer.click();
+    if (resultadosTraslado.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      indiceTraslado = Math.min(indiceTraslado + 1, resultadosTraslado.length - 1);
+      renderResultadosTraslado();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      indiceTraslado = Math.max(indiceTraslado - 1, 0);
+      renderResultadosTraslado();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const p = resultadosTraslado[indiceTraslado];
+      if (p) agregarATraslado(p.id);
     }
   });
   document.getElementById('btn-limpiar-traslado').addEventListener('click', () => {
