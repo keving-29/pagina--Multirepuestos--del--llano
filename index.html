@@ -45,6 +45,7 @@
       <button class="nav-tab active" data-tab="dashboard"><i class="ti ti-chart-bar"></i> Resumen</button>
       <button class="nav-tab" data-tab="inventario"><i class="ti ti-package"></i> Inventario</button>
       <button class="nav-tab" data-tab="ventas"><i class="ti ti-shopping-bag"></i> Vender</button>
+      <button class="nav-tab" data-tab="traslado"><i class="ti ti-truck"></i> Traslado</button>
       <button class="nav-tab" data-tab="historial"><i class="ti ti-history"></i> Historial</button>
       <button class="nav-tab" data-tab="reportes"><i class="ti ti-chart-pie"></i> Reportes</button>
       <button class="nav-tab" data-tab="config"><i class="ti ti-settings"></i> Config</button>
@@ -118,6 +119,30 @@
               <button class="btn-primary" id="btn-confirmar-venta">Confirmar venta</button>
             </div>
           </div>
+        </div>
+      </section>
+
+      <!-- TRASLADO -->
+      <section id="panel-traslado" class="panel">
+        <div class="card">
+          <div style="text-align:center;margin-bottom:1rem;padding-bottom:1rem;border-bottom:0.5px solid var(--borde)">
+            <h1 style="font-family:var(--fuente-titulo);font-size:22px;color:var(--rosa-oscuro)">Multirepuestos del Llano</h1>
+          </div>
+          <div class="section-header">
+            <h2>Traslado de productos</h2>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn-secundario" id="btn-imprimir-traslado"><i class="ti ti-printer"></i> Imprimir</button>
+              <button class="btn-peligro" id="btn-limpiar-traslado">Limpiar lista</button>
+            </div>
+          </div>
+          <p style="font-size:12px;color:var(--texto2);margin-bottom:1rem">Agrega productos a la lista de traslado. No se descuenta stock ni se registra como venta.</p>
+
+          <div id="traslado-busqueda-box">
+            <input type="text" id="traslado-search" placeholder="Buscar producto y presiona Enter...">
+            <div id="traslado-resultados"></div>
+          </div>
+
+          <div id="traslado-contenido"></div>
         </div>
       </section>
 
@@ -270,6 +295,25 @@
       </div>
       <div id="factura-contenido"></div>
     </div>
+  </div>
+
+  <!-- MODAL: Cantidad traslado -->
+  <div id="modal-cantidad-traslado" class="modal-bg hidden">
+    <div class="modal" style="max-width:360px">
+      <div class="modal-header">
+        <h3 id="ct-nombre" style="font-size:16px"></h3>
+        <button class="btn-cerrar-modal" data-modal="modal-cantidad-traslado">✕</button>
+      </div>
+      <p style="font-size:13px;color:var(--texto2);margin-bottom:10px">¿Cuántas unidades vas a trasladar?</p>
+      <input type="number" id="ct-cantidad" min="1" value="1" style="font-size:22px;text-align:center;font-weight:600">
+      <p style="font-size:11px;color:var(--texto3);margin-top:4px;margin-bottom:12px">Presiona Enter para agregar</p>
+      <button class="btn-primary" id="btn-ct-agregar" style="width:100%">Agregar al traslado</button>
+    </div>
+  </div>
+
+  <!-- IMPRESIÓN: Traslado -->
+  <div id="traslado-print">
+    <div id="traslado-print-contenido"></div>
   </div>
 
   <div id="toast"></div>

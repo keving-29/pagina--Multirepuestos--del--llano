@@ -20,6 +20,8 @@ let editandoProductoId  = null;
 let carritoItemEditando = null;
 let rapidoProductoActual = null;
 let periodoreporte      = 'semana';
+let traslado             = [];
+let trasladoProductoActual = null;
 
 // =============================================
 // GOOGLE SHEETS
@@ -202,6 +204,143 @@ function mostrarPanel(panel) {
     document.getElementById('venta-resultados').innerHTML = '';
     setTimeout(() => document.getElementById('venta-search').focus(), 100);
   }
+  if (panel === 'traslado') {
+    renderTraslado();
+    document.getElementById('traslado-search').value = '';
+    document.getElementById('traslado-resultados').innerHTML = '';
+    setTimeout(() => document.getElementById('traslado-search').focus(), 100);
+  }
+}
+
+// =============================================
+// TRASLADO (no afecta stock)
+// =============================================
+function buscarProductoTraslado() {
+  const q = document.getElementById('traslado-search').value.toLowerCase();
+  const cont = document.getElementById('traslado-resultados');
+  if (!q) { cont.innerHTML=''; return; }
+
+  const res = DB.productos
+    .filter(p => p.nombre.toLowerCase().includes(q) || p.ref.toLowerCase().includes(q))
+    .slice(0,8);
+
+  if (res.length===0) { cont.innerHTML='<p style="font-size:13px;color:var(--texto2);padding:8px 0">Sin resultados</p>'; return; }
+
+  cont.innerHTML = `
+    <div style="background:var(--card);border:0.5px solid var(--borde);border-radius:12px;overflow:hidden;margin-bottom:1rem;box-shadow:var(--sombra)">
+      <div style="padding:8px 12px;background:var(--blush-claro);border-bottom:0.5px solid var(--borde);font-size:11px;color:var(--texto2);font-weight:500;text-transform:uppercase;letter-spacing:0.5px">
+        Resultados — Enter para agregar el primero
+      </div>
+      ${res.map((p,i) => `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:0.5px solid var(--borde);flex-wrap:wrap;gap:8px;${i===0?'background:var(--rosa-claro)':''}">
+          <div>
+            ${i===0?'<span style="font-size:10px;background:var(--rosa);color:#fff;padding:2px 7px;border-radius:10px;margin-right:6px">↵ Enter</span>':''}
+            <span style="font-size:14px;font-weight:500">${esc(p.nombre)}</span>
+            <div style="font-size:12px;color:var(--texto2)">Código: ${esc(p.ref)} · P1: ${fmt(p.pventa1)}</div>
+          </div>
+          <button class="btn-primary btn-agregar-traslado" data-id="${p.id}" style="flex-shrink:0"><i class="ti ti-plus"></i> Agregar</button>
+        </div>`).join('')}
+    </div>`;
+
+  cont.querySelectorAll('.btn-agregar-traslado').forEach(b =>
+    b.addEventListener('click', () => agregarATraslado(b.dataset.id)));
+}
+
+function agregarATraslado(id) {
+  const p = DB.productos.find(x => x.id===id);
+  if (!p) return;
+  trasladoProductoActual = p;
+  document.getElementById('ct-nombre').textContent = p.nombre;
+  document.getElementById('ct-cantidad').value = '1';
+  abrirModal('modal-cantidad-traslado');
+  setTimeout(() => document.getElementById('ct-cantidad').focus(), 100);
+
+  document.getElementById('traslado-search').value = '';
+  document.getElementById('traslado-resultados').innerHTML = '';
+}
+
+function confirmarCantidadTraslado() {
+  const cant = parseInt(document.getElementById('ct-cantidad').value) || 0;
+  if (cant < 1) { alert('Ingresa una cantidad válida'); return; }
+  const p = trasladoProductoActual;
+  if (!p) return;
+
+  traslado.push({ itemId: uid(), codigo: p.ref, nombre: p.nombre, cantidad: cant, precio: p.pventa1 });
+  cerrarModal('modal-cantidad-traslado');
+  renderTraslado();
+  document.getElementById('traslado-search').focus();
+  mostrarToast('Producto agregado al traslado ✓');
+}
+
+function eliminarDeTraslado(itemId) {
+  traslado = traslado.filter(i => i.itemId !== itemId);
+  renderTraslado();
+}
+
+function renderTraslado() {
+  const cont = document.getElementById('traslado-contenido');
+  if (traslado.length === 0) {
+    cont.innerHTML = `<div class="estado-vacio"><i class="ti ti-truck"></i><p>Sin productos en el traslado.</p></div>`;
+    return;
+  }
+
+  const filas = traslado.map((i, idx) => `
+    <tr>
+      <td>${idx+1}</td>
+      <td><code style="background:var(--blush-claro);padding:2px 7px;border-radius:4px;font-size:12px">${esc(i.codigo)}</code></td>
+      <td>${esc(i.nombre)}</td>
+      <td style="text-align:center">${i.cantidad}</td>
+      <td>${fmt(i.precio)}</td>
+      <td><button class="btn-peligro btn-quitar-traslado" data-id="${i.itemId}" style="padding:5px 9px"><i class="ti ti-trash"></i></button></td>
+    </tr>`).join('');
+
+  cont.innerHTML = `
+    <p style="font-size:13px;color:var(--texto2);margin:0.5rem 0">Total de productos: <strong>${traslado.length}</strong></p>
+    <div class="tabla-wrap"><table>
+    <thead><tr><th>#</th><th>Código</th><th>Nombre</th><th>Cantidad</th><th>Precio</th><th></th></tr></thead>
+    <tbody>${filas}</tbody></table></div>`;
+
+  cont.querySelectorAll('.btn-quitar-traslado').forEach(b =>
+    b.addEventListener('click', () => eliminarDeTraslado(b.dataset.id)));
+}
+
+function imprimirTraslado() {
+  if (traslado.length === 0) { alert('Agrega productos al traslado antes de imprimir'); return; }
+
+  const ahora = new Date();
+  const fecha = ahora.toLocaleDateString('es-CO', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
+  const hora  = ahora.toLocaleTimeString('es-CO');
+
+  const filas = traslado.map((i, idx) => `
+    <tr>
+      <td>${idx+1}</td>
+      <td>${esc(i.codigo)}</td>
+      <td>${esc(i.nombre)}</td>
+      <td style="text-align:center">${i.cantidad}</td>
+      <td>${fmt(i.precio)}</td>
+    </tr>`).join('');
+
+  document.getElementById('traslado-print-contenido').innerHTML = `
+    <div id="tp-header">
+      <h1>Multirepuestos del Llano</h1>
+      <p>Traslado de productos</p>
+    </div>
+    <div id="tp-meta">
+      <span><strong>Fecha:</strong> ${fecha}</span>
+      <span><strong>Hora:</strong> ${hora}</span>
+    </div>
+    <table>
+      <thead><tr><th>#</th><th>Código</th><th>Nombre</th><th>Cantidad</th><th>Precio</th></tr></thead>
+      <tbody>${filas}</tbody>
+    </table>
+    <p style="margin-top:12px;font-size:13px"><strong>Total de productos:</strong> ${traslado.length}</p>
+    <div id="tp-firmas">
+      <div class="tp-firma"><div class="tp-linea"></div><span>Quien realiza el traslado</span></div>
+      <div class="tp-firma"><div class="tp-linea"></div><span>Quien recibe</span></div>
+    </div>
+  `;
+
+  window.print();
 }
 
 // =============================================
@@ -915,6 +1054,24 @@ document.addEventListener('DOMContentLoaded', () => {
       if (v&&v>0) rapidoAgregarConPrecio(v);
     }
   });
+
+  // Traslado — búsqueda con Enter
+  const trasladoSearch = document.getElementById('traslado-search');
+  trasladoSearch.addEventListener('input', buscarProductoTraslado);
+  trasladoSearch.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      const primer = document.querySelector('.btn-agregar-traslado');
+      if (primer) primer.click();
+    }
+  });
+  document.getElementById('btn-limpiar-traslado').addEventListener('click', () => {
+    if (traslado.length===0) return;
+    if (!confirm('¿Vaciar la lista de traslado?')) return;
+    traslado = []; renderTraslado();
+  });
+  document.getElementById('btn-imprimir-traslado').addEventListener('click', imprimirTraslado);
+  document.getElementById('btn-ct-agregar').addEventListener('click', confirmarCantidadTraslado);
+  document.getElementById('ct-cantidad').addEventListener('keydown', e => { if (e.key==='Enter') confirmarCantidadTraslado(); });
 
   // Historial
   document.getElementById('hist-fecha').addEventListener('change', renderHistorial);

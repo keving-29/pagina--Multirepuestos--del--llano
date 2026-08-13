@@ -499,3 +499,33 @@ input:focus, select:focus { border-color: var(--rosa-medio); background: var(--c
   text-align: left;
   justify-content: space-between;
 }
+/* IMPRESIÓN DE TRASLADO */
+#traslado-print { display: none; }
+
+#tp-firmas {
+  display: flex;
+  justify-content: space-between;
+  gap: 40px;
+  margin-top: 60px;
+}
+#tp-firmas .tp-firma { flex: 1; text-align: center; }
+#tp-firmas .tp-linea { border-top: 1px solid #000; margin-bottom: 6px; }
+
+@media print {
+  body * { visibility: hidden; }
+  #traslado-print, #traslado-print * { visibility: visible; }
+  #traslado-print {
+    display: block;
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    padding: 20px;
+    color: #000;
+  }
+  #tp-header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 12px; }
+  #tp-header h1 { font-family: var(--fuente-titulo); font-size: 24px; margin-bottom: 4px; }
+  #tp-meta { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 16px; }
+  #traslado-print table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  #traslado-print th, #traslado-print td { border: 1px solid #999; padding: 6px 10px; text-align: left; }
+  #traslado-print th { background: #eee; }
+}
