@@ -10,6 +10,8 @@ let DB = {
   usuarios:  [],
   productos: [],
   ventas:    [],
+  deudores:  [],
+  gastos:    [],
   config:    { stockMin: 5, trasladoContador: 0 }
 };
 
@@ -28,6 +30,9 @@ let resultadosVenta     = [];
 let indiceVenta         = 0;
 let resultadosTraslado  = [];
 let indiceTraslado      = 0;
+let editandoDeudorId    = null;
+let deudorAbonoActual   = null;
+let gastoCategoriaSeleccionada = null;
 
 // =============================================
 // GOOGLE SHEETS
@@ -89,6 +94,25 @@ async function sincronizar() {
     }));
   }
 
+  if (datos.Deudores && datos.Deudores.length > 1) {
+    DB.deudores = datos.Deudores.slice(1).map(f => ({
+      id: String(f[0]), nombre: String(f[1]||''), apellidos: String(f[2]||''),
+      cedula: String(f[3]||''), direccion: String(f[4]||''),
+      productoId: String(f[5]||''), productoNombre: String(f[6]||''),
+      cantidad: Number(f[7])||0, monto: Number(f[8])||0,
+      fecha: String(f[9]||''), hora: String(f[10]||''), fechaLimite: String(f[11]||''),
+      abonos: parsearJSON(f[12]), pagada: String(f[13])==='true', descontado: String(f[14])==='true'
+    }));
+  }
+
+  if (datos.Gastos && datos.Gastos.length > 1) {
+    DB.gastos = datos.Gastos.slice(1).map(f => ({
+      id: String(f[0]), categoria: String(f[1]||''), monto: Number(f[2])||0,
+      metodoPago: String(f[3]||'efectivo'), fecha: String(f[4]||''), hora: String(f[5]||''),
+      nota: String(f[6]||'')
+    }));
+  }
+
   if (datos.Config && datos.Config.length > 1) {
     DB.config.stockMin = Number(datos.Config[1][0]) || 5;
     DB.config.trasladoContador = Number(datos.Config[1][1]) || 0;
@@ -109,6 +133,10 @@ async function inicializarSheets() {
     await sheetsEscribir('append', 'Usuarios', ['Usuario','Contraseña','Rol']);
     await sheetsEscribir('append', 'Usuarios', ['admin','lubin2812','admin']);
   }
+  if (!datos.Deudores || datos.Deudores.length === 0)
+    await sheetsEscribir('append', 'Deudores', ['ID','Nombre','Apellidos','Cedula','Direccion','ProductoId','ProductoNombre','Cantidad','Monto','Fecha','Hora','FechaLimite','Abonos','Pagada','Descontado']);
+  if (!datos.Gastos || datos.Gastos.length === 0)
+    await sheetsEscribir('append', 'Gastos', ['ID','Categoria','Monto','MetodoPago','Fecha','Hora','Nota']);
   if (!datos.Config || datos.Config.length === 0) {
     await sheetsEscribir('append', 'Config', ['StockMin','TrasladoContador']);
     await sheetsEscribir('append', 'Config', [5, 0]);
@@ -156,6 +184,12 @@ function parseFechaCO(str) {
 function isoAFechaCO(iso) {
   const [y,m,d] = String(iso).split('-');
   return `${d}/${m}/${y}`;
+}
+function coAIso(co) {
+  if (!co) return '';
+  const [d,m,y] = String(co).split('/');
+  if (!d||!m||!y) return '';
+  return `${y}-${m}-${d}`;
 }
 
 function setSyncStatus(estado) {
@@ -228,6 +262,8 @@ function mostrarPanel(panel) {
 
   if (panel === 'dashboard')  renderDashboard();
   if (panel === 'inventario') renderInventario();
+  if (panel === 'deudores')   renderDeudores();
+  if (panel === 'gastos')     renderGastos();
   if (panel === 'historial')  renderHistorial();
   if (panel === 'reportes')   renderReportes(periodoreporte);
   if (panel === 'config')     renderConfig();
@@ -246,6 +282,13 @@ function mostrarPanel(panel) {
     resultadosTraslado = [];
     setTimeout(() => document.getElementById('traslado-search').focus(), 100);
   }
+
+  cerrarSidebarMovil();
+}
+
+function cerrarSidebarMovil() {
+  document.getElementById('sidebar').classList.remove('abierto');
+  document.getElementById('sidebar-backdrop').classList.remove('visible');
 }
 
 // =============================================
@@ -369,6 +412,7 @@ async function siguienteNumeroTraslado() {
 function prepararImpresion(idContenedor) {
   document.getElementById('traslado-print').classList.remove('activo');
   document.getElementById('venta-print').classList.remove('activo');
+  document.getElementById('deudor-print').classList.remove('activo');
   document.getElementById(idContenedor).classList.add('activo');
 }
 
@@ -415,6 +459,324 @@ async function imprimirTraslado() {
 }
 
 // =============================================
+// DEUDORES
+// =============================================
+function calcularAbonado(d) { return (d.abonos||[]).reduce((a,x) => a+x.monto, 0); }
+function calcularSaldo(d) { return Math.max(0, d.monto - calcularAbonado(d)); }
+function deudaVencida(d) {
+  if (!d.fechaLimite || calcularSaldo(d) <= 0) return false;
+  const hoy = new Date(); hoy.setHours(0,0,0,0);
+  return parseFechaCO(d.fechaLimite) < hoy;
+}
+
+function poblarSelectProductoDeudor() {
+  const sel = document.getElementById('deudor-producto');
+  const actual = sel.value;
+  sel.innerHTML = '<option value="">Producto que lleva (opcional)</option>' +
+    DB.productos.map(p => `<option value="${p.id}">${esc(p.nombre)} (Ref: ${esc(p.ref)}) — Stock: ${p.stock}</option>`).join('');
+  sel.value = actual;
+}
+
+function abrirModalDeudor(id) {
+  editandoDeudorId = id || null;
+  poblarSelectProductoDeudor();
+  document.getElementById('modal-deudor-titulo').textContent = id ? 'Editar deudor' : 'Agregar deudor';
+  if (id) {
+    const d = DB.deudores.find(x => x.id === id);
+    if (!d) return;
+    document.getElementById('deudor-nombre').value = d.nombre;
+    document.getElementById('deudor-apellidos').value = d.apellidos;
+    document.getElementById('deudor-cedula').value = d.cedula;
+    document.getElementById('deudor-direccion').value = d.direccion;
+    document.getElementById('deudor-producto').value = d.productoId || '';
+    document.getElementById('deudor-cantidad').value = d.cantidad || 1;
+    document.getElementById('deudor-monto').value = d.monto;
+    document.getElementById('deudor-fecha-limite').value = coAIso(d.fechaLimite);
+  } else {
+    ['deudor-nombre','deudor-apellidos','deudor-cedula','deudor-direccion','deudor-monto','deudor-fecha-limite'].forEach(x => document.getElementById(x).value='');
+    document.getElementById('deudor-producto').value = '';
+    document.getElementById('deudor-cantidad').value = '1';
+  }
+  abrirModal('modal-deudor');
+}
+
+async function guardarDeudor() {
+  const nombre = document.getElementById('deudor-nombre').value.trim();
+  const apellidos = document.getElementById('deudor-apellidos').value.trim();
+  const cedula = document.getElementById('deudor-cedula').value.trim();
+  const direccion = document.getElementById('deudor-direccion').value.trim();
+  const productoId = document.getElementById('deudor-producto').value;
+  const cantidad = parseInt(document.getElementById('deudor-cantidad').value)||0;
+  const monto = parseFloat(document.getElementById('deudor-monto').value)||0;
+  const fechaLimiteISO = document.getElementById('deudor-fecha-limite').value;
+  if (!nombre||!apellidos||!cedula||!monto) { alert('Completa los campos obligatorios (*)'); return; }
+
+  const producto = productoId ? DB.productos.find(p=>p.id===productoId) : null;
+  const fechaLimite = fechaLimiteISO ? isoAFechaCO(fechaLimiteISO) : '';
+
+  const btn = document.getElementById('btn-guardar-deudor');
+  btn.textContent='Guardando...'; btn.disabled=true;
+
+  if (editandoDeudorId) {
+    const d = DB.deudores.find(x => x.id===editandoDeudorId);
+    if (d) {
+      Object.assign(d, {
+        nombre, apellidos, cedula, direccion,
+        productoId: producto?producto.id:'', productoNombre: producto?producto.nombre:'',
+        cantidad, monto, fechaLimite
+      });
+      const idx = DB.deudores.findIndex(x => x.id===editandoDeudorId);
+      await sheetsEscribir('update','Deudores',[d.id,d.nombre,d.apellidos,d.cedula,d.direccion,d.productoId,d.productoNombre,d.cantidad,d.monto,d.fecha,d.hora,d.fechaLimite,JSON.stringify(d.abonos),d.pagada,d.descontado],idx+2);
+    }
+    btn.textContent='Guardar'; btn.disabled=false;
+    guardarLocal(); cerrarModal('modal-deudor'); renderDeudores();
+    mostrarToast('Deudor actualizado ✓');
+  } else {
+    const ahora = new Date();
+    const nuevo = {
+      id: uid(), nombre, apellidos, cedula, direccion,
+      productoId: producto?producto.id:'', productoNombre: producto?producto.nombre:'',
+      cantidad, monto, fecha: fechaCO(ahora), hora: horaCO(ahora), fechaLimite,
+      abonos: [], pagada: false, descontado: false
+    };
+    DB.deudores.push(nuevo);
+    await sheetsEscribir('append','Deudores',[nuevo.id,nuevo.nombre,nuevo.apellidos,nuevo.cedula,nuevo.direccion,nuevo.productoId,nuevo.productoNombre,nuevo.cantidad,nuevo.monto,nuevo.fecha,nuevo.hora,nuevo.fechaLimite,JSON.stringify(nuevo.abonos),nuevo.pagada,nuevo.descontado]);
+    btn.textContent='Guardar'; btn.disabled=false;
+    guardarLocal(); cerrarModal('modal-deudor'); renderDeudores();
+    mostrarToast('Deudor agregado ✓');
+    imprimirBoucherDeudor(nuevo);
+  }
+}
+
+async function eliminarDeudor(id) {
+  if (!confirm('¿Eliminar este deudor?')) return;
+  const idx = DB.deudores.findIndex(d => d.id===id);
+  await sheetsEscribir('delete','Deudores',null,idx+2);
+  DB.deudores = DB.deudores.filter(d => d.id!==id);
+  guardarLocal(); renderDeudores(); mostrarToast('Deudor eliminado');
+}
+
+function abrirModalAbono(id) {
+  deudorAbonoActual = id;
+  const d = DB.deudores.find(x => x.id===id);
+  if (!d) return;
+  document.getElementById('abono-nombre').textContent = `${d.nombre} ${d.apellidos}`;
+  document.getElementById('abono-saldo').textContent = `Saldo pendiente: ${fmt(calcularSaldo(d))}`;
+  document.getElementById('abono-monto').value = '';
+  document.querySelector('input[name="abono-metodo"][value="efectivo"]').checked = true;
+  abrirModal('modal-abono');
+  setTimeout(() => document.getElementById('abono-monto').focus(), 100);
+}
+
+async function guardarAbono() {
+  const d = DB.deudores.find(x => x.id===deudorAbonoActual);
+  if (!d) return;
+  const monto = parseFloat(document.getElementById('abono-monto').value)||0;
+  const saldo = calcularSaldo(d);
+  if (!monto || monto<=0) { alert('Ingresa un monto válido'); return; }
+  if (monto > saldo) { alert(`El abono no puede ser mayor al saldo pendiente (${fmt(saldo)})`); return; }
+  const metodoPago = document.querySelector('input[name="abono-metodo"]:checked').value;
+
+  const ahora = new Date();
+  d.abonos = d.abonos || [];
+  d.abonos.push({ id: uid(), monto, metodoPago, fecha: fechaCO(ahora), hora: horaCO(ahora) });
+
+  const nuevoSaldo = calcularSaldo(d);
+  if (nuevoSaldo <= 0) {
+    d.pagada = true;
+    if (d.productoId && !d.descontado) {
+      const p = DB.productos.find(x => x.id===d.productoId);
+      if (p) {
+        p.stock = Math.max(0, p.stock - (d.cantidad||0));
+        const idxP = DB.productos.findIndex(x => x.id===d.productoId);
+        await sheetsEscribir('update','Productos',[p.id,p.ref,p.nombre,p.pcompra,p.pventa1,p.pventa2,p.stock],idxP+2);
+      }
+      d.descontado = true;
+    }
+  }
+
+  const idx = DB.deudores.findIndex(x => x.id===d.id);
+  await sheetsEscribir('update','Deudores',[d.id,d.nombre,d.apellidos,d.cedula,d.direccion,d.productoId,d.productoNombre,d.cantidad,d.monto,d.fecha,d.hora,d.fechaLimite,JSON.stringify(d.abonos),d.pagada,d.descontado],idx+2);
+
+  guardarLocal();
+  cerrarModal('modal-abono');
+  renderDeudores();
+  mostrarToast(nuevoSaldo<=0 ? 'Deuda pagada completamente ✓' : `Abono registrado · ${fmt(monto)}`);
+  imprimirBoucherDeudor(d);
+}
+
+function renderDeudores() {
+  const cont = document.getElementById('deudores-contenido');
+  if (DB.deudores.length === 0) {
+    cont.innerHTML = `<div class="estado-vacio"><i class="ti ti-users"></i><p>Sin deudores registrados.</p></div>`;
+    return;
+  }
+
+  const ordenados = DB.deudores.slice().sort((a,b) => (calcularSaldo(b)>0?1:0) - (calcularSaldo(a)>0?1:0));
+
+  const filas = ordenados.map(d => {
+    const saldo = calcularSaldo(d);
+    const abonado = calcularAbonado(d);
+    const vencida = deudaVencida(d);
+    const badge = saldo<=0 ? '<span class="badge ok">Pagada</span>'
+      : vencida ? '<span class="badge danger">Vencida</span>'
+      : '<span class="badge alerta">Pendiente</span>';
+    return `<tr>
+      <td>${esc(d.nombre)} ${esc(d.apellidos)}<div style="font-size:11px;color:var(--texto2)">CC ${esc(d.cedula)}</div></td>
+      <td style="font-size:13px">${d.productoNombre?esc(d.productoNombre)+(d.cantidad?' x'+d.cantidad:''):'-'}</td>
+      <td>${fmt(d.monto)}</td>
+      <td>${fmt(abonado)}</td>
+      <td style="font-weight:500">${fmt(saldo)}</td>
+      <td style="font-size:13px">${d.fechaLimite||'-'}</td>
+      <td>${badge}</td>
+      <td><div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${saldo>0?`<button class="btn-primary btn-abonar-deudor" data-id="${d.id}" style="padding:6px 10px"><i class="ti ti-cash"></i></button>`:''}
+        <button class="btn-secundario btn-boucher-deudor" data-id="${d.id}" style="padding:6px 10px"><i class="ti ti-printer"></i></button>
+        <button class="btn-secundario btn-editar-deudor" data-id="${d.id}" style="padding:6px 10px"><i class="ti ti-edit"></i></button>
+        <button class="btn-peligro btn-eliminar-deudor" data-id="${d.id}" style="padding:6px 10px"><i class="ti ti-trash"></i></button>
+      </div></td>
+    </tr>`;
+  }).join('');
+
+  cont.innerHTML = `<div class="tabla-wrap"><table>
+    <thead><tr><th>Deudor</th><th>Producto</th><th>Monto</th><th>Abonado</th><th>Saldo</th><th>Fecha límite</th><th>Estado</th><th>Acciones</th></tr></thead>
+    <tbody>${filas}</tbody></table></div>`;
+
+  cont.querySelectorAll('.btn-abonar-deudor').forEach(b => b.addEventListener('click', () => abrirModalAbono(b.dataset.id)));
+  cont.querySelectorAll('.btn-boucher-deudor').forEach(b => b.addEventListener('click', () => {
+    const d = DB.deudores.find(x=>x.id===b.dataset.id); if (d) imprimirBoucherDeudor(d);
+  }));
+  cont.querySelectorAll('.btn-editar-deudor').forEach(b => b.addEventListener('click', () => abrirModalDeudor(b.dataset.id)));
+  cont.querySelectorAll('.btn-eliminar-deudor').forEach(b => b.addEventListener('click', () => eliminarDeudor(b.dataset.id)));
+}
+
+function imprimirBoucherDeudor(d) {
+  const ahora = new Date();
+  const abonos = d.abonos||[];
+  const saldo = calcularSaldo(d);
+
+  const filasAbonos = abonos.map((a,i) => `
+    <tr>
+      <td>${i+1}</td>
+      <td>${a.fecha} ${a.hora}</td>
+      <td>${a.metodoPago==='transferencia'?'Transferencia':'Efectivo'}</td>
+      <td style="text-align:right">${fmt(a.monto)}</td>
+    </tr>`).join('');
+
+  document.getElementById('deudor-print-contenido').innerHTML = `
+    <div id="tp-header">
+      <h1>Multirepuestos del Llano</h1>
+      <p>Comprobante de deuda</p>
+    </div>
+    <div id="tp-meta">
+      <span><strong>Fecha:</strong> ${fechaCO(ahora)}</span>
+      <span><strong>Hora:</strong> ${horaCO(ahora)}</span>
+    </div>
+    <p style="font-size:13px;margin-bottom:4px"><strong>Deudor:</strong> ${esc(d.nombre)} ${esc(d.apellidos)}</p>
+    <p style="font-size:13px;margin-bottom:4px"><strong>Cédula:</strong> ${esc(d.cedula)}</p>
+    ${d.direccion?`<p style="font-size:13px;margin-bottom:4px"><strong>Dirección:</strong> ${esc(d.direccion)}</p>`:''}
+    ${d.productoNombre?`<p style="font-size:13px;margin-bottom:4px"><strong>Producto:</strong> ${esc(d.productoNombre)}${d.cantidad?' x'+d.cantidad:''}</p>`:''}
+    ${d.fechaLimite?`<p style="font-size:13px;margin-bottom:12px"><strong>Fecha límite de pago:</strong> ${d.fechaLimite}</p>`:''}
+    <p style="margin-top:8px;font-size:14px"><strong>Monto total de la deuda: ${fmt(d.monto)}</strong></p>
+    ${abonos.length?`
+      <p style="margin-top:12px;font-size:13px"><strong>Abonos realizados:</strong></p>
+      <table>
+        <thead><tr><th>#</th><th>Fecha</th><th>Método</th><th>Monto</th></tr></thead>
+        <tbody>${filasAbonos}</tbody>
+      </table>`:''}
+    <p style="margin-top:12px;font-size:16px"><strong>Saldo pendiente: ${fmt(saldo)}</strong></p>
+    ${saldo<=0?'<p style="text-align:center;margin-top:8px;font-size:13px">DEUDA CANCELADA EN SU TOTALIDAD</p>':''}
+  `;
+
+  prepararImpresion('deudor-print');
+  window.print();
+}
+
+// =============================================
+// GASTOS DEL LOCAL
+// =============================================
+function seleccionarCategoriaGasto(cat, btn) {
+  gastoCategoriaSeleccionada = cat;
+  document.querySelectorAll('.gasto-cat-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+}
+
+function abrirModalGasto() {
+  gastoCategoriaSeleccionada = null;
+  document.querySelectorAll('.gasto-cat-btn').forEach(b => b.classList.remove('selected'));
+  document.getElementById('gasto-monto').value = '';
+  document.getElementById('gasto-nota').value = '';
+  document.querySelector('input[name="gasto-metodo"][value="efectivo"]').checked = true;
+  abrirModal('modal-gasto');
+}
+
+async function guardarGasto() {
+  const monto = parseFloat(document.getElementById('gasto-monto').value)||0;
+  const metodoPago = document.querySelector('input[name="gasto-metodo"]:checked').value;
+  const nota = document.getElementById('gasto-nota').value.trim();
+  if (!gastoCategoriaSeleccionada) { alert('Selecciona una categoría de gasto'); return; }
+  if (!monto || monto<=0) { alert('Ingresa un monto válido'); return; }
+
+  const ahora = new Date();
+  const gasto = { id: uid(), categoria: gastoCategoriaSeleccionada, monto, metodoPago, fecha: fechaCO(ahora), hora: horaCO(ahora), nota };
+  DB.gastos.push(gasto);
+  await sheetsEscribir('append','Gastos',[gasto.id,gasto.categoria,gasto.monto,gasto.metodoPago,gasto.fecha,gasto.hora,gasto.nota]);
+
+  guardarLocal();
+  cerrarModal('modal-gasto');
+  renderGastos();
+  mostrarToast('Gasto registrado ✓');
+}
+
+async function eliminarGasto(id) {
+  if (!confirm('¿Eliminar este gasto?')) return;
+  const idx = DB.gastos.findIndex(g => g.id===id);
+  await sheetsEscribir('delete','Gastos',null,idx+2);
+  DB.gastos = DB.gastos.filter(g => g.id!==id);
+  guardarLocal(); renderGastos(); mostrarToast('Gasto eliminado');
+}
+
+function renderGastos() {
+  const ahora = new Date();
+  const gastosMes = DB.gastos.filter(g => {
+    const d = parseFechaCO(g.fecha);
+    return d.getMonth()===ahora.getMonth() && d.getFullYear()===ahora.getFullYear();
+  });
+  const totalMes = gastosMes.reduce((a,g)=>a+g.monto,0);
+  const efectivoMes = gastosMes.filter(g=>g.metodoPago!=='transferencia').reduce((a,g)=>a+g.monto,0);
+  const transferenciaMes = gastosMes.filter(g=>g.metodoPago==='transferencia').reduce((a,g)=>a+g.monto,0);
+
+  document.getElementById('gastos-resumen').innerHTML = `
+    <div id="dash-metrics">
+      <div class="metric rosa"><div class="mlabel">Gastos de este mes</div><div class="mvalue">${fmt(totalMes)}</div></div>
+      <div class="metric"><div class="mlabel">💵 Efectivo</div><div class="mvalue">${fmt(efectivoMes)}</div></div>
+      <div class="metric"><div class="mlabel">🏦 Transferencia</div><div class="mvalue">${fmt(transferenciaMes)}</div></div>
+    </div>`;
+
+  const cont = document.getElementById('gastos-contenido');
+  if (DB.gastos.length === 0) {
+    cont.innerHTML = `<div class="estado-vacio"><i class="ti ti-receipt-2"></i><p>Sin gastos registrados.</p></div>`;
+    return;
+  }
+
+  const filas = DB.gastos.slice().reverse().map(g => `
+    <tr>
+      <td>${g.fecha}</td>
+      <td><span class="badge rosa">${esc(g.categoria)}</span></td>
+      <td>${fmt(g.monto)}</td>
+      <td><span class="badge ${g.metodoPago==='transferencia'?'rosa':'verde'}">${g.metodoPago==='transferencia'?'🏦 Transferencia':'💵 Efectivo'}</span></td>
+      <td style="font-size:13px;color:var(--texto2)">${esc(g.nota)||'-'}</td>
+      <td><button class="btn-peligro btn-eliminar-gasto" data-id="${g.id}" style="padding:5px 9px"><i class="ti ti-trash"></i></button></td>
+    </tr>`).join('');
+
+  cont.innerHTML = `<div class="tabla-wrap"><table>
+    <thead><tr><th>Fecha</th><th>Categoría</th><th>Monto</th><th>Método</th><th>Nota</th><th></th></tr></thead>
+    <tbody>${filas}</tbody></table></div>`;
+
+  cont.querySelectorAll('.btn-eliminar-gasto').forEach(b => b.addEventListener('click', () => eliminarGasto(b.dataset.id)));
+}
+
+// =============================================
 // DASHBOARD
 // =============================================
 function renderDashboard() {
@@ -423,6 +785,7 @@ function renderDashboard() {
   const totalVendido  = ventasHoy.reduce((a,v) => a+v.total, 0);
   const sinStock  = DB.productos.filter(p => p.stock <= 0).length;
   const stockBajo = DB.productos.filter(p => p.stock > 0 && p.stock <= DB.config.stockMin).length;
+  const deudasVencidas = DB.deudores.filter(d => deudaVencida(d)).length;
 
   document.getElementById('dash-fecha').textContent = 'Hoy · ' + new Date().toLocaleDateString('es-CO',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
 
@@ -432,6 +795,7 @@ function renderDashboard() {
     <div class="metric"><div class="mlabel">Productos</div><div class="mvalue">${DB.productos.length}</div></div>
     ${stockBajo>0?`<div class="metric alerta"><div class="mlabel">Stock bajo</div><div class="mvalue">${stockBajo}</div></div>`:''}
     ${sinStock>0?`<div class="metric danger"><div class="mlabel">Sin stock</div><div class="mvalue">${sinStock}</div></div>`:''}
+    ${deudasVencidas>0?`<div class="metric danger"><div class="mlabel">Deudas vencidas</div><div class="mvalue">${deudasVencidas}</div></div>`:''}
   `;
 
   const cont = document.getElementById('dash-ventas-hoy');
@@ -1006,6 +1370,15 @@ function renderReportes(periodo) {
   const ganEfectivo    = ventas.filter(v=>v.metodoPago!=='transferencia').reduce((a,v)=>a+v.ganancia,0);
   const ganTransf      = ventas.filter(v=>v.metodoPago==='transferencia').reduce((a,v)=>a+v.ganancia,0);
 
+  const gastosPeriodo = DB.gastos.filter(g => {
+    const d = parseFechaCO(g.fecha);
+    return d >= desde && d <= hasta;
+  });
+  const totalGastos       = gastosPeriodo.reduce((a,g)=>a+g.monto,0);
+  const gastosEfectivo    = gastosPeriodo.filter(g=>g.metodoPago!=='transferencia').reduce((a,g)=>a+g.monto,0);
+  const gastosTransf      = gastosPeriodo.filter(g=>g.metodoPago==='transferencia').reduce((a,g)=>a+g.monto,0);
+  const gananciaNeta      = totalGanancia - totalGastos;
+
   const labels = { dia:'hoy', semana:'esta semana', mes:'este mes', año:'este año' };
   const tituloTabla = { dia:'Ventas de hoy', semana:'Ventas de la semana', mes:'Ventas del mes', año:'Ventas del año' };
 
@@ -1013,11 +1386,12 @@ function renderReportes(periodo) {
   document.getElementById('reporte-metrics').innerHTML = `
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:1.5rem">
       <div class="metric rosa"><div class="mlabel">Total vendido ${labels[periodo]}</div><div class="mvalue">${fmt(totalVendido)}</div></div>
-      <div class="metric rosa"><div class="mlabel">Ganancia ${labels[periodo]}</div><div class="mvalue">${fmt(totalGanancia)}</div></div>
+      <div class="metric danger"><div class="mlabel">Total gastado ${labels[periodo]}</div><div class="mvalue">${fmt(totalGastos)}</div></div>
+      <div class="metric rosa"><div class="mlabel">Ganancia neta ${labels[periodo]}</div><div class="mvalue">${fmt(gananciaNeta)}</div></div>
       <div class="metric"><div class="mlabel">Transacciones</div><div class="mvalue">${ventas.length}</div></div>
     </div>`;
 
-  // Desglose por método de pago
+  // Desglose por método de pago — ventas
   document.getElementById('reporte-pago').innerHTML = `
     <div class="reporte-pago-card">
       <span class="rp-icon">💵</span>
@@ -1036,6 +1410,24 @@ function renderReportes(periodo) {
       <div class="rp-label">Total combinado</div>
       <div class="rp-value">${fmt(totalVendido)}</div>
       <div class="rp-sub">Ganancia total: ${fmt(totalGanancia)}</div>
+    </div>`;
+
+  // Desglose por método de pago — gastos
+  document.getElementById('reporte-gastos-pago').innerHTML = `
+    <div class="reporte-pago-card">
+      <span class="rp-icon">💵</span>
+      <div class="rp-label">Gastos en Efectivo</div>
+      <div class="rp-value">${fmt(gastosEfectivo)}</div>
+    </div>
+    <div class="reporte-pago-card">
+      <span class="rp-icon">🏦</span>
+      <div class="rp-label">Gastos por Transferencia</div>
+      <div class="rp-value">${fmt(gastosTransf)}</div>
+    </div>
+    <div class="reporte-pago-card" style="border:0.5px solid var(--rosa-medio)">
+      <span class="rp-icon">📉</span>
+      <div class="rp-label">Total gastado</div>
+      <div class="rp-value">${fmt(totalGastos)}</div>
     </div>`;
 
   document.getElementById('reporte-titulo-tabla').textContent = tituloTabla[periodo];
@@ -1151,6 +1543,8 @@ document.addEventListener('DOMContentLoaded', () => {
   cargarLocal();
   if (DB.usuarios.length===0) DB.usuarios=[{user:'admin',pass:'lubin2812',rol:'admin'}];
   if (DB.config.trasladoContador === undefined) DB.config.trasladoContador = 0;
+  if (!DB.deudores) DB.deudores = [];
+  if (!DB.gastos) DB.gastos = [];
 
   // Sesión persistente
   const sesionGuardada = cargarSesion();
@@ -1169,6 +1563,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // Navegación
   document.querySelectorAll('.nav-tab').forEach(t=>t.addEventListener('click',()=>mostrarPanel(t.dataset.tab)));
   document.querySelector('[data-goto="ventas"]').addEventListener('click',()=>mostrarPanel('ventas'));
+
+  // Menú lateral (móvil)
+  document.getElementById('btn-menu-toggle').addEventListener('click', () => {
+    document.getElementById('sidebar').classList.toggle('abierto');
+    document.getElementById('sidebar-backdrop').classList.toggle('visible');
+  });
+  document.getElementById('sidebar-backdrop').addEventListener('click', cerrarSidebarMovil);
 
   // Cerrar modales
   document.querySelectorAll('.btn-cerrar-modal').forEach(b=>b.addEventListener('click',()=>cerrarModal(b.dataset.modal)));
@@ -1269,6 +1670,18 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-imprimir-traslado').addEventListener('click', imprimirTraslado);
   document.getElementById('btn-ct-agregar').addEventListener('click', confirmarCantidadTraslado);
   document.getElementById('ct-cantidad').addEventListener('keydown', e => { if (e.key==='Enter') confirmarCantidadTraslado(); });
+
+  // Deudores
+  document.getElementById('btn-abrir-modal-deudor').addEventListener('click', () => abrirModalDeudor(null));
+  document.getElementById('btn-guardar-deudor').addEventListener('click', guardarDeudor);
+  document.getElementById('btn-guardar-abono').addEventListener('click', guardarAbono);
+  document.getElementById('abono-monto').addEventListener('keydown', e => { if (e.key==='Enter') guardarAbono(); });
+
+  // Gastos
+  document.getElementById('btn-abrir-modal-gasto').addEventListener('click', abrirModalGasto);
+  document.getElementById('btn-guardar-gasto').addEventListener('click', guardarGasto);
+  document.querySelectorAll('.gasto-cat-btn').forEach(b =>
+    b.addEventListener('click', () => seleccionarCategoriaGasto(b.dataset.cat, b)));
 
   // Historial
   document.getElementById('hist-fecha').addEventListener('change', renderHistorial);
