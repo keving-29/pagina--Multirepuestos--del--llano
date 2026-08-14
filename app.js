@@ -133,8 +133,8 @@ async function sincronizar() {
 
   if (datos.Proveedores && datos.Proveedores.length > 1) {
     DB.proveedores = datos.Proveedores.slice(1).map(f => ({
-      id: String(f[0]), empresa: String(f[1]||''), fechaLlegadaPedido: String(f[2]||''),
-      monto: Number(f[3])||0, numeroCuotas: Number(f[4])||1, fechaLimite: String(f[5]||''),
+      id: String(f[0]), empresa: String(f[1]||''), fechaLlegadaPedido: isoAFechaCO(f[2]),
+      monto: Number(f[3])||0, numeroCuotas: Number(f[4])||1, fechaLimite: isoAFechaCO(f[5]),
       fecha: String(f[6]||''), hora: String(f[7]||''),
       abonos: parsearJSON(f[8]), pagada: String(f[9])==='true'
     }));
@@ -143,7 +143,7 @@ async function sincronizar() {
   if (datos.Gastos && datos.Gastos.length > 1) {
     DB.gastos = datos.Gastos.slice(1).map(f => ({
       id: String(f[0]), categoria: String(f[1]||''), monto: Number(f[2])||0,
-      metodoPago: String(f[3]||'efectivo'), fecha: String(f[4]||''), hora: String(f[5]||''),
+      metodoPago: String(f[3]||'efectivo'), fecha: isoAFechaCO(f[4]), hora: String(f[5]||''),
       nota: String(f[6]||'')
     }));
   }
@@ -221,8 +221,24 @@ function parseFechaCO(str) {
   return new Date(yyyy||1970, (mm||1)-1, dd||1);
 }
 function isoAFechaCO(iso) {
-  const [y,m,d] = String(iso).split('-');
-  return `${d}/${m}/${y}`;
+  if (!iso) return '';
+
+  const valor = String(iso).trim();
+
+  // Si ya viene en formato colombiano, lo dejamos igual
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(valor)) {
+    return valor;
+  }
+
+  // Si viene como YYYY-MM-DD o YYYY-MM-DDTHH:mm:ss...
+  const match = valor.match(/^(\d{4})-(\d{2})-(\d{2})/);
+
+  if (match) {
+    const [, anio, mes, dia] = match;
+    return `${dia}/${mes}/${anio}`;
+  }
+
+  return valor;
 }
 function coAIso(co) {
   if (!co) return '';
@@ -560,8 +576,14 @@ function inicializarBuscadorProducto(key, inputId, resultadosId, onSeleccionar) 
 // =============================================
 // DEUDAS / ANTICIPOS — utilidades comunes
 // =============================================
-function calcularAbonado(d) { return (d.abonos||[]).reduce((a,x) => a+x.monto, 0); }
-function calcularSaldo(d) { return Math.max(0, d.monto - calcularAbonado(d)); }
+function calcularAbonado(d) {
+  const abonos = Array.isArray(d.abonos) ? d.abonos : [];
+  return abonos.reduce((a, x) => a + (Number(x.monto) || 0), 0);
+}
+
+function calcularSaldo(d) {
+  return Math.max(0, (Number(d.monto) || 0) - calcularAbonado(d));
+}
 function deudaVencida(d) {
   if (!d.fechaLimite || calcularSaldo(d) <= 0) return false;
   const hoy = new Date(); hoy.setHours(0,0,0,0);
