@@ -45,10 +45,17 @@ const buscadoresProducto = {};
 // =============================================
 // GOOGLE SHEETS
 // =============================================
+// Nunca esperar la red para siempre: si no responde en 15s, se cancela y se sigue trabajando localmente.
+function fetchConTimeout(url, opciones, ms = 15000) {
+  const control = new AbortController();
+  const t = setTimeout(() => control.abort(), ms);
+  return fetch(url, { ...opciones, signal: control.signal }).finally(() => clearTimeout(t));
+}
+
 async function sheetsLeer() {
   try {
     setSyncStatus('cargando');
-    const r = await fetch(SCRIPT_URL + '?action=getAll');
+    const r = await fetchConTimeout(SCRIPT_URL + '?action=getAll');
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const d = await r.json();
     setSyncStatus('conectado');
@@ -62,7 +69,7 @@ async function sheetsLeer() {
 async function sheetsEscribir(accion, hoja, datos, fila) {
   try {
     setSyncStatus('cargando');
-    const r = await fetch(SCRIPT_URL, {
+    const r = await fetchConTimeout(SCRIPT_URL, {
       method: 'POST',
       body: JSON.stringify({ action: accion, sheet: hoja, data: datos, row: fila })
     });
@@ -679,8 +686,7 @@ async function guardarAbono() {
   if (tipoAbonoActual==='deudor') renderDeudores(); else renderAnticipos();
   renderDashboard();
   const completado = calcularSaldo(d)<=0;
-  mostrarToast(completado ? (tipoAbonoActual==='deudor'?'Deuda pagada completamente ✓':'Anticipo pagado completamente ✓') : `Pago registrado · ${fmt(monto)}`);
-  imprimirBoucherDeuda(d, tipoAbonoActual);
+  mostrarToast(completado ? (tipoAbonoActual==='deudor'?'Deuda pagada completamente ✓':'Anticipo pagado completamente ✓') : `Pago registrado · ${fmt(monto)}. Usa el botón de imprimir si quieres el boucher.`);
 }
 
 // =============================================
@@ -809,8 +815,7 @@ async function guardarDeudor() {
 
   guardarLocal(); btn.textContent='Guardar'; btn.disabled=false;
   cerrarModal('modal-deudor'); renderDeudores(); renderDashboard();
-  mostrarToast('Deudor agregado ✓');
-  imprimirBoucherDeuda(nuevo, 'deudor');
+  mostrarToast('Deudor agregado ✓ (usa el botón de imprimir para el boucher)');
 }
 
 async function eliminarDeudor(id) {
@@ -979,8 +984,7 @@ async function guardarAnticipo() {
 
   guardarLocal(); btn.textContent='Guardar'; btn.disabled=false;
   cerrarModal('modal-anticipo'); renderAnticipos(); renderDashboard();
-  mostrarToast('Anticipo agregado ✓');
-  imprimirBoucherDeuda(nuevo, 'anticipo');
+  mostrarToast('Anticipo agregado ✓ (usa el botón de imprimir para el boucher)');
 }
 
 async function eliminarAnticipo(id) {
@@ -1127,8 +1131,7 @@ async function guardarAbonoProveedor() {
   cerrarModal('modal-abono-proveedor');
   renderProveedores();
   renderDashboard();
-  mostrarToast(p.pagada ? 'Factura pagada completamente ✓' : `Pago registrado · ${fmt(monto)}`);
-  imprimirBoucherProveedor(p);
+  mostrarToast(p.pagada ? 'Factura pagada completamente ✓' : `Pago registrado · ${fmt(monto)}. Usa el botón de imprimir si quieres el boucher.`);
 }
 
 function imprimirBoucherProveedor(p) {
@@ -1780,8 +1783,7 @@ async function confirmarVenta() {
   await sheetsEscribir('append','Ventas',[venta.id,venta.fecha,venta.hora,venta.total,venta.ganancia,venta.nota,venta.metodoPago,JSON.stringify(venta.items)]);
 
   guardarLocal();
-  mostrarToast(`Venta registrada · ${metodoPago==='transferencia'?'🏦':'💵'} ${fmt(total)}`);
-  imprimirBoucher(venta);
+  mostrarToast(`Venta registrada · ${metodoPago==='transferencia'?'🏦':'💵'} ${fmt(total)}. Tócala en "Ventas de hoy" para imprimir el boucher.`);
 
   carrito=[];
   renderCarrito();
