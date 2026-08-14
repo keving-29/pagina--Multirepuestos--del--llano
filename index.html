@@ -39,6 +39,8 @@
           <button class="nav-tab" data-tab="ventas"><i class="ti ti-shopping-bag"></i> Vender</button>
           <button class="nav-tab" data-tab="traslado"><i class="ti ti-truck"></i> Traslado</button>
           <button class="nav-tab" data-tab="deudores"><i class="ti ti-users"></i> Deudores</button>
+          <button class="nav-tab" data-tab="anticipos"><i class="ti ti-cash-banknote"></i> Anticipos</button>
+          <button class="nav-tab" data-tab="proveedores"><i class="ti ti-building-warehouse"></i> Proveedores</button>
           <button class="nav-tab" data-tab="gastos"><i class="ti ti-receipt-2"></i> Gastos</button>
           <button class="nav-tab" data-tab="historial"><i class="ti ti-history"></i> Historial</button>
           <button class="nav-tab" data-tab="reportes"><i class="ti ti-chart-pie"></i> Reportes</button>
@@ -168,6 +170,29 @@
         </div>
       </section>
 
+      <!-- ANTICIPOS -->
+      <section id="panel-anticipos" class="panel">
+        <div class="card">
+          <div class="section-header">
+            <h2>Anticipos</h2>
+            <button class="btn-primary" id="btn-abrir-modal-anticipo">+ Agregar</button>
+          </div>
+          <p style="font-size:12px;color:var(--texto2);margin-bottom:1rem">El producto sigue en el inventario hasta que el cliente cancele el anticipo por completo; ahí se descuenta y se lo lleva.</p>
+          <div id="anticipos-contenido"></div>
+        </div>
+      </section>
+
+      <!-- PROVEEDORES -->
+      <section id="panel-proveedores" class="panel">
+        <div class="card">
+          <div class="section-header">
+            <h2>Proveedores</h2>
+            <button class="btn-primary" id="btn-abrir-modal-proveedor">+ Agregar factura</button>
+          </div>
+          <div id="proveedores-contenido"></div>
+        </div>
+      </section>
+
       <!-- GASTOS -->
       <section id="panel-gastos" class="panel">
         <div class="card">
@@ -211,16 +236,22 @@
         <p style="font-size:11px;color:var(--texto2);font-weight:500;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Ventas por método de pago</p>
         <div id="reporte-pago" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:1.5rem"></div>
 
-        <!-- Desglose gastos -->
-        <p style="font-size:11px;color:var(--texto2);font-weight:500;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Gastos por método de pago</p>
-        <div id="reporte-gastos-pago" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:1.5rem"></div>
-
         <!-- Tabla de ventas del periodo -->
         <div class="card">
           <div class="section-header">
             <h2 id="reporte-titulo-tabla">Ventas de la semana</h2>
           </div>
           <div id="reporte-contenido"></div>
+        </div>
+
+        <!-- Resumen neto del mes (independiente de las pestañas de arriba) -->
+        <div class="card" style="margin-top:1.5rem;border:0.5px solid var(--rosa-medio)">
+          <div class="section-header">
+            <h2>Resumen neto del mes</h2>
+          </div>
+          <p style="font-size:12px;color:var(--texto2);margin-bottom:1rem">Ganancia de ventas menos gastos del local, mes a mes (se reinicia automáticamente cada mes).</p>
+          <div id="resumen-neto-metrics"></div>
+          <div id="resumen-neto-pago" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:12px"></div>
         </div>
       </section>
 
@@ -351,17 +382,117 @@
       <input type="text" id="deudor-apellidos" placeholder="Apellidos *">
       <input type="text" id="deudor-cedula" placeholder="Número de cédula *">
       <input type="text" id="deudor-direccion" placeholder="Dirección">
-      <select id="deudor-producto">
-        <option value="">Producto que lleva (opcional)</option>
-      </select>
-      <input type="number" id="deudor-cantidad" placeholder="Cantidad" min="1" value="1">
+
+      <p style="font-size:11px;color:var(--texto2);font-weight:500;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Producto que lleva (opcional)</p>
+      <div id="deudor-producto-busqueda-box">
+        <input type="text" id="deudor-producto-buscar" placeholder="Buscar por nombre o código...">
+        <div id="deudor-producto-resultados"></div>
+      </div>
+      <div id="deudor-producto-seleccionado" class="producto-seleccionado-box hidden">
+        <div class="producto-seleccionado-info">
+          <strong id="deudor-producto-nombre"></strong>
+          <span id="deudor-producto-detalle"></span>
+        </div>
+        <button type="button" class="btn-peligro" id="btn-quitar-producto-deudor" style="padding:6px 10px"><i class="ti ti-x"></i></button>
+      </div>
+      <input type="number" id="deudor-cantidad" placeholder="Cantidad" min="1" value="1" class="hidden">
+
       <input type="number" id="deudor-monto" placeholder="Monto total de la deuda *">
+      <input type="number" id="deudor-anticipo" placeholder="¿Cuánto paga ahora? (opcional)">
+      <p style="font-size:11px;color:var(--texto2);font-weight:500;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Método de pago del anticipo</p>
+      <div style="display:flex;gap:20px;margin-bottom:14px">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="deudor-metodo" value="efectivo" checked=""> 💵 Efectivo</label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="deudor-metodo" value="transferencia"> 🏦 Transferencia</label>
+      </div>
+      <input type="text" id="deudor-nota" placeholder="Comentario opcional">
       <label style="display:block;font-size:11px;color:var(--texto2);font-weight:500;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Fecha límite de pago</label>
       <input type="date" id="deudor-fecha-limite">
       <div style="display:flex;gap:8px;margin-top:4px">
         <button class="btn-cerrar-modal" data-modal="modal-deudor" style="flex:1">Cancelar</button>
         <button class="btn-primary" id="btn-guardar-deudor" style="flex:1">Guardar</button>
       </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Agregar/Editar anticipo -->
+  <div id="modal-anticipo" class="modal-bg hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="modal-anticipo-titulo">Agregar anticipo</h3>
+        <button class="btn-cerrar-modal" data-modal="modal-anticipo">✕</button>
+      </div>
+      <input type="text" id="anticipo-nombre" placeholder="Nombre *">
+      <input type="text" id="anticipo-apellidos" placeholder="Apellidos *">
+      <input type="text" id="anticipo-cedula" placeholder="Número de cédula *">
+      <input type="text" id="anticipo-direccion" placeholder="Dirección">
+
+      <p style="font-size:11px;color:var(--texto2);font-weight:500;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Producto</p>
+      <div id="anticipo-producto-busqueda-box">
+        <input type="text" id="anticipo-producto-buscar" placeholder="Buscar por nombre o código...">
+        <div id="anticipo-producto-resultados"></div>
+      </div>
+      <div id="anticipo-producto-seleccionado" class="producto-seleccionado-box hidden">
+        <div class="producto-seleccionado-info">
+          <strong id="anticipo-producto-nombre"></strong>
+          <span id="anticipo-producto-detalle"></span>
+        </div>
+        <button type="button" class="btn-peligro" id="btn-quitar-producto-anticipo" style="padding:6px 10px"><i class="ti ti-x"></i></button>
+      </div>
+      <input type="number" id="anticipo-cantidad" placeholder="Cantidad" min="1" value="1" class="hidden">
+
+      <input type="number" id="anticipo-monto" placeholder="Monto total *">
+      <input type="number" id="anticipo-inicial" placeholder="¿Cuánto paga ahora? (opcional)">
+      <p style="font-size:11px;color:var(--texto2);font-weight:500;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Método de pago</p>
+      <div style="display:flex;gap:20px;margin-bottom:14px">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="anticipo-metodo" value="efectivo" checked=""> 💵 Efectivo</label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="anticipo-metodo" value="transferencia"> 🏦 Transferencia</label>
+      </div>
+      <input type="text" id="anticipo-nota" placeholder="Comentario opcional">
+      <label style="display:block;font-size:11px;color:var(--texto2);font-weight:500;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Fecha límite de pago</label>
+      <input type="date" id="anticipo-fecha-limite">
+      <div style="display:flex;gap:8px;margin-top:4px">
+        <button class="btn-cerrar-modal" data-modal="modal-anticipo" style="flex:1">Cancelar</button>
+        <button class="btn-primary" id="btn-guardar-anticipo" style="flex:1">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Agregar factura de proveedor -->
+  <div id="modal-proveedor" class="modal-bg hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Agregar factura de proveedor</h3>
+        <button class="btn-cerrar-modal" data-modal="modal-proveedor">✕</button>
+      </div>
+      <input type="text" id="proveedor-empresa" placeholder="Nombre de la empresa *">
+      <label style="display:block;font-size:11px;color:var(--texto2);font-weight:500;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Fecha de llegada del pedido</label>
+      <input type="date" id="proveedor-fecha-llegada">
+      <input type="number" id="proveedor-monto" placeholder="Monto total del pedido *">
+      <input type="number" id="proveedor-cuotas" placeholder="Número de cuotas" min="1" value="1">
+      <label style="display:block;font-size:11px;color:var(--texto2);font-weight:500;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Fecha límite de pago</label>
+      <input type="date" id="proveedor-fecha-limite">
+      <div style="display:flex;gap:8px;margin-top:4px">
+        <button class="btn-cerrar-modal" data-modal="modal-proveedor" style="flex:1">Cancelar</button>
+        <button class="btn-primary" id="btn-guardar-proveedor" style="flex:1">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Abonar factura proveedor -->
+  <div id="modal-abono-proveedor" class="modal-bg hidden">
+    <div class="modal" style="max-width:380px">
+      <div class="modal-header">
+        <h3 id="abono-proveedor-nombre" style="font-size:16px"></h3>
+        <button class="btn-cerrar-modal" data-modal="modal-abono-proveedor">✕</button>
+      </div>
+      <p id="abono-proveedor-saldo" style="font-size:13px;color:var(--texto2);margin-bottom:10px"></p>
+      <input type="number" id="abono-proveedor-monto" placeholder="Monto que abonas *">
+      <p style="font-size:11px;color:var(--texto2);font-weight:500;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Método de pago</p>
+      <div style="display:flex;gap:20px;margin-bottom:14px">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="abono-proveedor-metodo" value="efectivo" checked=""> 💵 Efectivo</label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="abono-proveedor-metodo" value="transferencia"> 🏦 Transferencia</label>
+      </div>
+      <button class="btn-primary" id="btn-guardar-abono-proveedor" style="width:100%">Registrar pago</button>
     </div>
   </div>
 
@@ -437,9 +568,14 @@
     <div id="venta-print-contenido"></div>
   </div>
 
-  <!-- IMPRESIÓN: Boucher de deudor -->
+  <!-- IMPRESIÓN: Boucher de deudor / anticipo -->
   <div id="deudor-print">
     <div id="deudor-print-contenido"></div>
+  </div>
+
+  <!-- IMPRESIÓN: Boucher de proveedor -->
+  <div id="proveedor-print">
+    <div id="proveedor-print-contenido"></div>
   </div>
 
   <div id="toast" class="">Datos sincronizados ✓</div>
