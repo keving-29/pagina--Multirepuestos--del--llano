@@ -14,6 +14,7 @@ let DB = {
   anticipos: [],
   proveedores: [],
   gastos:    [],
+  traslados: [],
   config:    { stockMin: 5, trasladoContador: 0 }
 };
 
@@ -40,6 +41,7 @@ let productoSeleccionadoDeudor   = null;
 let productoSeleccionadoAnticipo = null;
 let editandoAnticipoId  = null;
 let proveedorAbonoActual = null;
+let inventarioMostrar = 10;
 const buscadoresProducto = {};
 
 // =============================================
@@ -115,7 +117,7 @@ async function sincronizar() {
       cedula: String(f[3]||''), direccion: String(f[4]||''),
       productoId: String(f[5]||''), productoNombre: String(f[6]||''),
       cantidad: Number(f[7])||0, precioUnit: Number(f[8])||0, monto: Number(f[9])||0,
-      nota: String(f[10]||''), fecha: String(f[11]||''), hora: String(f[12]||''), fechaLimite: String(f[13]||''),
+      nota: String(f[10]||''), fecha: isoAFechaCO(f[11]), hora: String(f[12]||''), fechaLimite: isoAFechaCO(f[13]),
       abonos: parsearJSON(f[14]), pagada: String(f[15])==='true'
     }));
   }
@@ -126,7 +128,7 @@ async function sincronizar() {
       cedula: String(f[3]||''), direccion: String(f[4]||''),
       productoId: String(f[5]||''), productoNombre: String(f[6]||''),
       cantidad: Number(f[7])||0, precioUnit: Number(f[8])||0, monto: Number(f[9])||0,
-      nota: String(f[10]||''), fecha: String(f[11]||''), hora: String(f[12]||''), fechaLimite: String(f[13]||''),
+      nota: String(f[10]||''), fecha: isoAFechaCO(f[11]), hora: String(f[12]||''), fechaLimite: isoAFechaCO(f[13]),
       abonos: parsearJSON(f[14]), pagada: String(f[15])==='true', descontado: String(f[16])==='true'
     }));
   }
@@ -145,6 +147,13 @@ async function sincronizar() {
       id: String(f[0]), categoria: String(f[1]||''), monto: Number(f[2])||0,
       metodoPago: String(f[3]||'efectivo'), fecha: isoAFechaCO(f[4]), hora: String(f[5]||''),
       nota: String(f[6]||'')
+    }));
+  }
+
+  if (datos.Traslados && datos.Traslados.length > 1) {
+    DB.traslados = datos.Traslados.slice(1).map(f => ({
+      id: String(f[0]), numero: String(f[1]||''), fecha: isoAFechaCO(f[2]), hora: String(f[3]||''),
+      items: parsearJSON(f[4])
     }));
   }
 
@@ -176,6 +185,8 @@ async function inicializarSheets() {
     await sheetsEscribir('append', 'Proveedores', ['ID','Empresa','FechaLlegadaPedido','Monto','NumeroCuotas','FechaLimite','Fecha','Hora','Abonos','Pagada']);
   if (!datos.Gastos || datos.Gastos.length === 0)
     await sheetsEscribir('append', 'Gastos', ['ID','Categoria','Monto','MetodoPago','Fecha','Hora','Nota']);
+  if (!datos.Traslados || datos.Traslados.length === 0)
+    await sheetsEscribir('append', 'Traslados', ['ID','Numero','Fecha','Hora','Items']);
   if (!datos.Config || datos.Config.length === 0) {
     await sheetsEscribir('append', 'Config', ['StockMin','TrasladoContador']);
     await sheetsEscribir('append', 'Config', [5, 0]);
@@ -334,6 +345,7 @@ function mostrarPanel(panel) {
   }
   if (panel === 'traslado') {
     renderTraslado();
+    renderTrasladosHistorial();
     document.getElementById('traslado-search').value = '';
     document.getElementById('traslado-resultados').innerHTML = '';
     resultadosTraslado = [];
@@ -453,10 +465,13 @@ function renderTraslado() {
     b.addEventListener('click', () => eliminarDeTraslado(b.dataset.id)));
 }
 
+// La fila 1 es el encabezado (se crea una sola vez en inicializarSheets) y la
+// fila 2 son los valores actuales: se actualiza directo esa fila, sin borrar
+// y reconstruir el sheet completo (eso dejaba una ventana donde una lectura
+// a mitad de camino podía encontrar el sheet sin valores y devolver el
+// contador en 0, reiniciando la numeración de traslados).
 async function guardarConfigSheet() {
-  await sheetsEscribir('clear','Config',null,null);
-  await sheetsEscribir('append','Config',['StockMin','TrasladoContador']);
-  await sheetsEscribir('append','Config',[DB.config.stockMin, DB.config.trasladoContador]);
+  await sheetsEscribir('update','Config',[DB.config.stockMin, DB.config.trasladoContador], 2);
 }
 
 async function siguienteNumeroTraslado() {
@@ -474,15 +489,8 @@ function prepararImpresion(idContenedor) {
   document.getElementById(idContenedor).classList.add('activo');
 }
 
-async function imprimirTraslado() {
-  if (traslado.length === 0) { alert('Agrega productos al traslado antes de imprimir'); return; }
-
-  const numero = await siguienteNumeroTraslado();
-  const ahora = new Date();
-  const fecha = fechaCO(ahora);
-  const hora  = horaCO(ahora);
-
-  const filas = traslado.map((i, idx) => `
+function construirHtmlTrasladoPrint(numero, fecha, hora, items) {
+  const filas = items.map((i, idx) => `
     <tr>
       <td>${idx+1}</td>
       <td>${esc(i.codigo)}</td>
@@ -491,7 +499,7 @@ async function imprimirTraslado() {
       <td>${fmt(i.precio)}</td>
     </tr>`).join('');
 
-  document.getElementById('traslado-print-contenido').innerHTML = `
+  return `
     <div id="tp-header">
       <h1>Multirepuestos del Llano</h1>
       <p>Traslado de productos</p>
@@ -505,15 +513,68 @@ async function imprimirTraslado() {
       <thead><tr><th>#</th><th>Código</th><th>Nombre</th><th>Cantidad</th><th>Precio</th></tr></thead>
       <tbody>${filas}</tbody>
     </table>
-    <p style="margin-top:12px;font-size:13px"><strong>Total de productos:</strong> ${traslado.length}</p>
+    <p style="margin-top:12px;font-size:13px"><strong>Total de productos:</strong> ${items.length}</p>
     <div id="tp-firmas">
       <div class="tp-firma"><div class="tp-linea"></div><span>Quien realiza el traslado</span></div>
       <div class="tp-firma"><div class="tp-linea"></div><span>Quien recibe</span></div>
     </div>
   `;
+}
 
+async function guardarTrasladoRealizado(numero, fecha, hora, items) {
+  const registro = { id: uid(), numero, fecha, hora, items: items.map(i=>({...i})) };
+  DB.traslados.push(registro);
+  guardarLocal();
+  await sheetsEscribir('append','Traslados',[registro.id, registro.numero, registro.fecha, registro.hora, JSON.stringify(registro.items)]);
+  return registro;
+}
+
+async function imprimirTraslado() {
+  if (traslado.length === 0) { alert('Agrega productos al traslado antes de imprimir'); return; }
+
+  const numero = await siguienteNumeroTraslado();
+  const ahora = new Date();
+  const fecha = fechaCO(ahora);
+  const hora  = horaCO(ahora);
+
+  await guardarTrasladoRealizado(numero, fecha, hora, traslado);
+  renderTrasladosHistorial();
+
+  document.getElementById('traslado-print-contenido').innerHTML = construirHtmlTrasladoPrint(numero, fecha, hora, traslado);
   prepararImpresion('traslado-print');
   window.print();
+}
+
+function reimprimirTraslado(registro) {
+  document.getElementById('traslado-print-contenido').innerHTML =
+    construirHtmlTrasladoPrint(registro.numero, registro.fecha, registro.hora, registro.items);
+  prepararImpresion('traslado-print');
+  window.print();
+}
+
+function renderTrasladosHistorial() {
+  const cont = document.getElementById('traslados-historial-contenido');
+  if (!cont) return;
+  if (DB.traslados.length === 0) {
+    cont.innerHTML = `<div class="estado-vacio"><i class="ti ti-history"></i><p>Sin traslados registrados todavía.</p></div>`;
+    return;
+  }
+  const ordenados = DB.traslados.slice().reverse();
+  const filas = ordenados.map(t => `
+    <tr>
+      <td style="font-weight:500">${esc(t.numero)}</td>
+      <td>${t.fecha}</td>
+      <td>${t.hora}</td>
+      <td style="text-align:center">${t.items.length}</td>
+      <td><button class="btn-secundario btn-reimprimir-traslado" data-id="${t.id}" style="padding:6px 10px"><i class="ti ti-printer"></i></button></td>
+    </tr>`).join('');
+  cont.innerHTML = `<div class="tabla-wrap"><table>
+    <thead><tr><th>Número</th><th>Fecha</th><th>Hora</th><th>Productos</th><th></th></tr></thead>
+    <tbody>${filas}</tbody></table></div>`;
+  cont.querySelectorAll('.btn-reimprimir-traslado').forEach(b => b.addEventListener('click', () => {
+    const t = DB.traslados.find(x => x.id === b.dataset.id);
+    if (t) reimprimirTraslado(t);
+  }));
 }
 
 // =============================================
@@ -527,7 +588,7 @@ function inicializarBuscadorProducto(key, inputId, resultadosId, onSeleccionar) 
   function renderizar() {
     const estado = buscadoresProducto[key];
     cont.innerHTML = `
-      <div style="background:var(--card);border:0.5px solid var(--borde);border-radius:12px;overflow:hidden;margin-bottom:1rem;box-shadow:0 4px 16px rgba(194,105,143,0.12)">
+      <div style="background:var(--card);border:0.5px solid var(--borde);border-radius:12px;overflow:hidden;margin-bottom:1rem;box-shadow:0 4px 16px rgba(31,122,77,0.12)">
         <div style="padding:8px 12px;background:var(--blush-claro);border-bottom:0.5px solid var(--borde);font-size:11px;color:var(--texto2);font-weight:500;text-transform:uppercase;letter-spacing:0.5px">
           Resultados — ↑↓ para navegar, Enter para elegir
         </div>
@@ -1370,7 +1431,7 @@ function renderDashboard() {
       <td style="font-size:13px;color:var(--texto2)">${v.nota||'-'}</td>
       <td><span class="badge ${v.metodoPago==='transferencia'?'rosa':'verde'}">${v.metodoPago==='transferencia'?'🏦 Transferencia':'💵 Efectivo'}</span></td>
       <td style="font-weight:500">${fmt(v.total)}</td>
-      <td style="color:var(--rosa-oscuro);font-weight:500">${fmt(v.ganancia)}</td>
+      <td style="color:var(--dorado-oscuro);font-weight:500">${fmt(v.ganancia)}</td>
       <td><i class="ti ti-receipt" style="color:var(--rosa-medio);font-size:16px"></i></td>
     </tr>`).join('');
 
@@ -1422,7 +1483,7 @@ function abrirFactura(venta) {
         <span>Total</span><span>${fmt(venta.total)}</span>
       </div>
       <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--texto2);margin-top:6px">
-        <span>Ganancia</span><span style="color:var(--rosa-oscuro);font-weight:500">${fmt(venta.ganancia)}</span>
+        <span>Ganancia</span><span style="color:var(--dorado-oscuro);font-weight:500">${fmt(venta.ganancia)}</span>
       </div>
     </div>
     <div style="text-align:center;margin-top:1.5rem;padding-top:1rem;border-top:0.5px solid var(--borde);font-size:12px;color:var(--texto3)">¡Gracias por tu compra! 🌸</div>
@@ -1479,7 +1540,8 @@ function renderInventario() {
     return;
   }
 
-  const filas = prods.map(p => {
+  const visibles = prods.slice(0, inventarioMostrar);
+  const filas = visibles.map(p => {
     const badge = p.stock<=0 ? '<span class="badge danger">Sin stock</span>'
       : p.stock<=DB.config.stockMin ? '<span class="badge alerta">Stock bajo</span>'
       : '<span class="badge ok">OK</span>';
@@ -1500,11 +1562,14 @@ function renderInventario() {
 
   cont.innerHTML = `<div class="tabla-wrap"><table>
     <thead><tr><th>Ref</th><th>Nombre</th><th>P.Compra <i class="ti ti-lock" style="font-size:10px"></i></th><th>P.Venta 1</th><th>P.Venta 2</th><th>Stock</th><th>Acciones</th></tr></thead>
-    <tbody>${filas}</tbody></table></div>`;
+    <tbody>${filas}</tbody></table></div>
+    ${prods.length>inventarioMostrar?`<button class="btn-secundario" id="btn-ver-mas-inventario" style="width:100%;margin-top:10px">Ver más productos (${prods.length-inventarioMostrar} restantes)</button>`:''}`;
 
   cont.querySelectorAll('.btn-editar-producto').forEach(b => b.addEventListener('click', () => abrirModalProducto(b.dataset.id)));
   cont.querySelectorAll('.btn-eliminar-producto').forEach(b => b.addEventListener('click', () => eliminarProducto(b.dataset.id)));
   cont.querySelectorAll('.precio-oculto').forEach(b => b.addEventListener('click', pedirPin));
+  const btnVerMas = document.getElementById('btn-ver-mas-inventario');
+  if (btnVerMas) btnVerMas.addEventListener('click', () => { inventarioMostrar += 10; renderInventario(); });
 }
 
 function abrirModalProducto(id) {
@@ -1597,7 +1662,7 @@ function buscarProductoVenta() {
 function renderResultadosVenta() {
   const cont = document.getElementById('venta-resultados');
   cont.innerHTML = `
-    <div style="background:var(--card);border:0.5px solid var(--borde);border-radius:12px;overflow:hidden;margin-bottom:1rem;box-shadow:0 4px 16px rgba(194,105,143,0.12)">
+    <div style="background:var(--card);border:0.5px solid var(--borde);border-radius:12px;overflow:hidden;margin-bottom:1rem;box-shadow:0 4px 16px rgba(31,122,77,0.12)">
       <div style="padding:8px 12px;background:var(--blush-claro);border-bottom:0.5px solid var(--borde);font-size:11px;color:var(--texto2);font-weight:500;text-transform:uppercase;letter-spacing:0.5px">
         Resultados — ↑↓ para navegar, Enter para seleccionar
       </div>
@@ -1840,7 +1905,7 @@ function renderHistorial() {
 
   summary.innerHTML=`<div id="dash-metrics" style="margin-bottom:1rem">
     <div class="metric rosa" style="display:inline-block;margin-right:12px;margin-bottom:8px;min-width:160px"><div class="mlabel">Total vendido</div><div class="mvalue">${fmt(totalDia)}</div></div>
-    <div class="metric rosa" style="display:inline-block;margin-right:12px;margin-bottom:8px;min-width:160px"><div class="mlabel">Ganancia total</div><div class="mvalue">${fmt(ganDia)}</div></div>
+    <div class="metric dorado" style="display:inline-block;margin-right:12px;margin-bottom:8px;min-width:160px"><div class="mlabel">Ganancia total</div><div class="mvalue">${fmt(ganDia)}</div></div>
     <div class="metric" style="display:inline-block;margin-right:12px;margin-bottom:8px;min-width:140px"><div class="mlabel">💵 Efectivo</div><div class="mvalue">${fmt(efectivo)}</div></div>
     <div class="metric" style="display:inline-block;margin-bottom:8px;min-width:160px"><div class="mlabel">🏦 Transferencia</div><div class="mvalue">${fmt(transferencia)}</div></div>
   </div>`;
@@ -1852,7 +1917,7 @@ function renderHistorial() {
       <td style="font-size:13px;color:var(--texto2)">${v.nota||'-'}</td>
       <td><span class="badge ${v.metodoPago==='transferencia'?'rosa':'verde'}">${v.metodoPago==='transferencia'?'🏦 Transferencia':'💵 Efectivo'}</span></td>
       <td style="font-weight:500">${fmt(v.total)}</td>
-      <td style="color:var(--rosa-oscuro);font-weight:500">${fmt(v.ganancia)}</td>
+      <td style="color:var(--dorado-oscuro);font-weight:500">${fmt(v.ganancia)}</td>
       <td><div style="display:flex;gap:6px">
         <button class="btn-secundario btn-ver-factura" data-id="${v.id}" style="padding:5px 9px"><i class="ti ti-receipt"></i></button>
         <button class="btn-peligro btn-eliminar-venta" data-id="${v.id}" style="padding:5px 9px"><i class="ti ti-trash"></i></button>
@@ -1929,13 +1994,12 @@ function renderReportes(periodo) {
   const ganTransf      = ventas.filter(v=>v.metodoPago==='transferencia').reduce((a,v)=>a+v.ganancia,0);
 
   const labels = { dia:'hoy', semana:'esta semana', mes:'este mes', año:'este año' };
-  const tituloTabla = { dia:'Ventas de hoy', semana:'Ventas de la semana', mes:'Ventas del mes', año:'Ventas del año' };
 
   // Métricas principales — solo ventas, sin mezclar gastos
   document.getElementById('reporte-metrics').innerHTML = `
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:1.5rem">
       <div class="metric rosa"><div class="mlabel">Total vendido ${labels[periodo]}</div><div class="mvalue">${fmt(totalVendido)}</div></div>
-      <div class="metric rosa"><div class="mlabel">Ganancia ${labels[periodo]}</div><div class="mvalue">${fmt(totalGanancia)}</div></div>
+      <div class="metric dorado"><div class="mlabel">Ganancia ${labels[periodo]}</div><div class="mvalue">${fmt(totalGanancia)}</div></div>
       <div class="metric"><div class="mlabel">Transacciones</div><div class="mvalue">${ventas.length}</div></div>
     </div>`;
 
@@ -1960,42 +2024,8 @@ function renderReportes(periodo) {
       <div class="rp-sub">Ganancia total: ${fmt(totalGanancia)}</div>
     </div>`;
 
-  document.getElementById('reporte-titulo-tabla').textContent = tituloTabla[periodo];
-
   // Resumen neto del mes: siempre el mes actual, independiente del periodo elegido arriba
   renderResumenNetoMes();
-
-  // Tabla de ventas del periodo
-  const cont = document.getElementById('reporte-contenido');
-  if (ventas.length === 0) {
-    cont.innerHTML=`<div class="estado-vacio"><i class="ti ti-chart-pie"></i><p>Sin ventas en este periodo</p></div>`;
-    return;
-  }
-
-  const filas = ventas.slice().reverse().map(v=>`
-    <tr class="fila-venta-clickeable" data-id="${v.id}">
-      <td>${v.fecha}</td>
-      <td>${v.hora}</td>
-      <td style="font-size:13px">${(v.items||[]).map(i=>esc(i.nombre)+' x'+i.cantidad).join(', ')}</td>
-      <td><span class="badge ${v.metodoPago==='transferencia'?'rosa':'verde'}">${v.metodoPago==='transferencia'?'🏦 Trans.':'💵 Efect.'}</span></td>
-      <td style="font-weight:500">${fmt(v.total)}</td>
-      <td style="color:var(--rosa-oscuro);font-weight:500">${fmt(v.ganancia)}</td>
-      <td><button class="btn-secundario btn-ver-factura-rep" data-id="${v.id}" style="padding:5px 9px"><i class="ti ti-receipt"></i></button></td>
-    </tr>`).join('');
-
-  cont.innerHTML=`<div class="tabla-wrap"><table>
-    <thead><tr><th>Fecha</th><th>Hora</th><th>Productos</th><th>Pago</th><th>Total</th><th>Ganancia</th><th></th></tr></thead>
-    <tbody>${filas}</tbody></table></div>`;
-
-  cont.querySelectorAll('.fila-venta-clickeable').forEach(f=>
-    f.addEventListener('click',()=>{
-      const v=DB.ventas.find(x=>x.id===f.dataset.id); if(v) abrirFactura(v);
-    }));
-  cont.querySelectorAll('.btn-ver-factura-rep').forEach(b=>
-    b.addEventListener('click', e => {
-      e.stopPropagation();
-      const v=DB.ventas.find(x=>x.id===b.dataset.id); if(v) abrirFactura(v);
-    }));
 }
 
 // Resumen neto del mes actual: ganancia de ventas menos gastos, y ventas menos pagos a proveedores.
@@ -2027,9 +2057,9 @@ function renderResumenNetoMes() {
 
   document.getElementById('resumen-neto-metrics').innerHTML = `
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px">
-      <div class="metric rosa"><div class="mlabel">Ganancia del mes</div><div class="mvalue">${fmt(gananciaMes)}</div></div>
+      <div class="metric dorado"><div class="mlabel">Ganancia del mes</div><div class="mvalue">${fmt(gananciaMes)}</div></div>
       <div class="metric danger"><div class="mlabel">Gastos del mes</div><div class="mvalue">${fmt(totalGastosMes)}</div></div>
-      <div class="metric rosa"><div class="mlabel">Ganancia neta del mes</div><div class="mvalue">${fmt(gananciaNetaMes)}</div></div>
+      <div class="metric dorado"><div class="mlabel">Ganancia neta del mes</div><div class="mvalue">${fmt(gananciaNetaMes)}</div></div>
       <div class="metric"><div class="mlabel">Ventas del mes</div><div class="mvalue">${fmt(totalVendidoMes)}</div></div>
       <div class="metric danger"><div class="mlabel">Pagos a proveedores (mes)</div><div class="mvalue">${fmt(pagosProveedoresMes)}</div></div>
       <div class="metric"><div class="mlabel">Ventas netas del mes</div><div class="mvalue">${fmt(ventasNetasMes)}</div></div>
@@ -2132,6 +2162,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (!DB.anticipos) DB.anticipos = [];
   if (!DB.proveedores) DB.proveedores = [];
   if (!DB.gastos) DB.gastos = [];
+  if (!DB.traslados) DB.traslados = [];
 
   // Sesión persistente
   const sesionGuardada = cargarSesion();
@@ -2165,7 +2196,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Inventario
   document.getElementById('btn-abrir-modal-producto').addEventListener('click',()=>abrirModalProducto(null));
   document.getElementById('btn-guardar-producto').addEventListener('click', guardarProducto);
-  document.getElementById('inv-search').addEventListener('input', renderInventario);
+  document.getElementById('inv-search').addEventListener('input', () => { inventarioMostrar = 10; renderInventario(); });
   habilitarEnterAvanza(['prod-ref','prod-nombre','prod-pcompra','prod-pventa1','prod-pventa2','prod-stock'], guardarProducto);
 
   // Factura / boucher
@@ -2301,7 +2332,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Reportes
   document.querySelectorAll('.btn-reporte').forEach(b=>
-    b.addEventListener('click',()=>renderReportes(b.dataset.periodo)));
+    b.addEventListener('click',()=> renderReportes(b.dataset.periodo)));
 
   // Config
   document.getElementById('btn-agregar-usuario').addEventListener('click', agregarUsuario);

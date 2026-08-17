@@ -1,21 +1,22 @@
 :root {
-  --rosa:        #9E1B32;
-  --rosa-oscuro: #6B0F1F;
-  --rosa-medio:  #B84A4A;
-  --rosa-claro:  #F5E4E4;
-  --blush:       #EFD3D3;
-  --blush-claro: #FBF4F4;
-  --malva:       #8C5A5A;
-  --malva-claro: #F1E4E4;
-  --dorado:      #A88848;
-  --dorado-claro:#FBF6EC;
-  --texto:       #2B1414;
-  --texto2:      #6B4A4A;
-  --texto3:      #B89A9A;
-  --fondo:       #FDFBFB;
+  --rosa:        #1F7A4D;
+  --rosa-oscuro: #124D30;
+  --rosa-medio:  #3F9A67;
+  --rosa-claro:  #E1F3E7;
+  --blush:       #C9EAD3;
+  --blush-claro: #F3FBF5;
+  --malva:       #1E8A8A;
+  --malva-claro: #E0F5F5;
+  --dorado:      #D97706;
+  --dorado-oscuro:#A85D04;
+  --dorado-claro:#FDF3E3;
+  --texto:       #142118;
+  --texto2:      #4B6656;
+  --texto3:      #A9C2B2;
+  --fondo:       #FAFDFB;
   --card:        #FFFFFF;
-  --borde:       #E8D4D4;
-  --sombra:      0 2px 12px rgba(107,15,31,0.10);
+  --borde:       #D7EADB;
+  --sombra:      0 2px 12px rgba(18,77,48,0.10);
   --radio:       12px;
   --fuente-titulo: 'Playfair Display', serif;
   --fuente-cuerpo: 'Inter', sans-serif;
@@ -47,7 +48,7 @@ body {
   border-radius: 20px;
   padding: 2.5rem;
   width: 360px;
-  box-shadow: 0 8px 40px rgba(194,105,143,0.15);
+  box-shadow: 0 8px 40px rgba(31,122,77,0.15);
   border: 0.5px solid var(--borde);
   display: flex;
   flex-direction: column;
@@ -140,7 +141,7 @@ body {
   position: sticky;
   top: 0;
   z-index: 100;
-  box-shadow: 0 2px 8px rgba(194,105,143,0.06);
+  box-shadow: 0 2px 8px rgba(31,122,77,0.06);
 }
 
 #btn-menu-toggle {
@@ -252,6 +253,7 @@ body {
 .metric .mlabel { font-size: 11px; color: var(--texto2); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 500; margin-bottom: 5px; }
 .metric .mvalue { font-size: 22px; font-weight: 600; font-family: var(--fuente-titulo); color: var(--texto); }
 .metric.rosa   .mvalue { color: var(--rosa-oscuro); }
+.metric.dorado .mvalue { color: var(--dorado-oscuro); }
 .metric.alerta .mvalue { color: #BA7517; }
 .metric.danger .mvalue { color: #A32D2D; }
 
@@ -458,7 +460,7 @@ input:focus, select:focus { border-color: var(--rosa-medio); background: var(--c
 .modal-bg {
   position: fixed;
   inset: 0;
-  background: rgba(61,43,54,0.45);
+  background: rgba(14,28,20,0.45);
   z-index: 200;
   display: flex;
   align-items: center;
@@ -473,7 +475,7 @@ input:focus, select:focus { border-color: var(--rosa-medio); background: var(--c
   max-width: 480px;
   max-height: 90vh;
   overflow-y: auto;
-  box-shadow: 0 12px 48px rgba(194,105,143,0.2);
+  box-shadow: 0 12px 48px rgba(31,122,77,0.2);
 }
 
 .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.2rem; }
@@ -491,7 +493,7 @@ input:focus, select:focus { border-color: var(--rosa-medio); background: var(--c
   border-radius: 12px;
   font-size: 14px;
   z-index: 999;
-  box-shadow: 0 4px 20px rgba(139,63,98,0.3);
+  box-shadow: 0 4px 20px rgba(18,77,48,0.3);
   opacity: 0;
   transform: translateY(10px);
   transition: opacity 0.3s, transform 0.3s;
@@ -517,7 +519,7 @@ input:focus, select:focus { border-color: var(--rosa-medio); background: var(--c
   #sidebar-backdrop {
     display: none;
     position: fixed; inset: 0;
-    background: rgba(43,20,20,0.45);
+    background: rgba(14,28,20,0.45);
     z-index: 290;
   }
   #sidebar-backdrop.visible { display: block; }
@@ -598,7 +600,7 @@ input:focus, select:focus { border-color: var(--rosa-medio); background: var(--c
 .reporte-pago-card .rp-icon { font-size: 24px; margin-bottom: 6px; display: block; }
 .reporte-pago-card .rp-label { font-size: 11px; color: var(--texto2); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 500; margin-bottom: 4px; }
 .reporte-pago-card .rp-value { font-size: 20px; font-weight: 600; font-family: var(--fuente-titulo); color: var(--rosa-oscuro); }
-.reporte-pago-card .rp-sub { font-size: 12px; color: var(--texto3); margin-top: 2px; }
+.reporte-pago-card .rp-sub { font-size: 15px; color: var(--dorado-oscuro); margin-top: 4px; font-weight: 500; }
 
 /* FLUJO RÁPIDO */
 #rapido-paso-precio .btn-primary,

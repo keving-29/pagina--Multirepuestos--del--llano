@@ -52,7 +52,7 @@
         <div id="topbar">
           <button id="btn-menu-toggle" aria-label="Abrir menú"><i class="ti ti-menu-2"></i></button>
           <div id="topbar-right">
-            <span id="sync-status" class="conectado">Conectado</span>
+            <span id="sync-status">Conectando...</span>
             <span id="topbar-user">KEVIN · admin</span>
             <button id="btn-logout">Salir</button>
           </div>
@@ -62,20 +62,14 @@
 
       <!-- DASHBOARD -->
       <section id="panel-dashboard" class="panel active">
-        <p id="dash-fecha">Hoy · viernes, 14 de agosto de 2026</p>
-        <div id="dash-metrics">
-    <div class="metric rosa"><div class="mlabel">Total vendido hoy</div><div class="mvalue">$0</div></div>
-    <div class="metric"><div class="mlabel">Transacciones</div><div class="mvalue">0</div></div>
-    <div class="metric"><div class="mlabel">Productos</div><div class="mvalue">64</div></div>
-    <div class="metric alerta"><div class="mlabel">Stock bajo</div><div class="mvalue">48</div></div>
-    <div class="metric danger"><div class="mlabel">Sin stock</div><div class="mvalue">1</div></div>
-  </div>
+        <p id="dash-fecha"></p>
+        <div id="dash-metrics"></div>
         <div class="card">
           <div class="section-header">
             <h2>Ventas de hoy</h2>
             <button class="btn-primary" data-goto="ventas">+ Nueva venta</button>
           </div>
-          <div id="dash-ventas-hoy"><div class="estado-vacio"><i class="ti ti-shopping-bag"></i><p>Sin ventas hoy. ¡A vender!</p></div></div>
+          <div id="dash-ventas-hoy"></div>
         </div>
       </section>
 
@@ -157,6 +151,13 @@
 
           <div id="traslado-contenido"></div>
         </div>
+
+        <div class="card">
+          <div class="section-header">
+            <h2>Traslados realizados</h2>
+          </div>
+          <div id="traslados-historial-contenido"></div>
+        </div>
       </section>
 
       <!-- DEUDORES -->
@@ -235,14 +236,6 @@
         <!-- Desglose pago ventas -->
         <p style="font-size:11px;color:var(--texto2);font-weight:500;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Ventas por método de pago</p>
         <div id="reporte-pago" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:1.5rem"></div>
-
-        <!-- Tabla de ventas del periodo -->
-        <div class="card">
-          <div class="section-header">
-            <h2 id="reporte-titulo-tabla">Ventas de la semana</h2>
-          </div>
-          <div id="reporte-contenido"></div>
-        </div>
 
         <!-- Resumen neto del mes (independiente de las pestañas de arriba) -->
         <div class="card" style="margin-top:1.5rem;border:0.5px solid var(--rosa-medio)">
@@ -578,7 +571,7 @@
     <div id="proveedor-print-contenido"></div>
   </div>
 
-  <div id="toast" class="">Datos sincronizados ✓</div>
+  <div id="toast"></div>
   <script src="app.js"></script>
 
 </body></html>
