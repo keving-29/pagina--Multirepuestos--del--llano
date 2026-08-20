@@ -2337,4 +2337,4 @@ document.addEventListener('DOMContentLoaded', () => {
   // Config
   document.getElementById('btn-agregar-usuario').addEventListener('click', agregarUsuario);
   document.getElementById('btn-guardar-config').addEventListener('click', guardarConfig);
-});
+}); 

@@ -655,7 +655,7 @@ input:focus, select:focus { border-color: var(--rosa-medio); background: var(--c
   #proveedor-print.activo, #proveedor-print.activo * { visibility: visible; }
   #traslado-print.activo, #venta-print.activo, #deudor-print.activo, #proveedor-print.activo {
     display: block;
-    position: absolute;
+    position: absolute; 
     top: 0; left: 0;
     width: 100%;
     padding: 20px;
