@@ -68,18 +68,31 @@ async function sheetsLeer() {
   }
 }
 
-async function sheetsEscribir(accion, hoja, datos, fila) {
+// "filaOId" puede ser un número de fila (como antes) o el id de la fila
+// (string) — en ese caso el backend la busca solo, sin depender de la
+// posición exacta. Eso es lo que se usa para actualizar una venta con su
+// alegraId después de facturarla, sin arriesgarse a pisar la fila que no es.
+async function sheetsEscribir(accion, hoja, datos, filaOId) {
   try {
     setSyncStatus('cargando');
+    const body = { action: accion, sheet: hoja, data: datos };
+    if (typeof filaOId === 'number') body.row = filaOId;
+    else if (filaOId) body.id = filaOId;
+
     const r = await fetchConTimeout(SCRIPT_URL, {
       method: 'POST',
-      body: JSON.stringify({ action: accion, sheet: hoja, data: datos, row: fila })
+      body: JSON.stringify(body)
     });
     if (!r.ok) throw new Error('HTTP ' + r.status);
+    const respuesta = await r.json();
+    if (!respuesta || respuesta.ok !== true) {
+      throw new Error((respuesta && respuesta.error) || 'Google Sheets rechazó la operación.');
+    }
     setSyncStatus('conectado');
     return true;
   } catch (e) {
     setSyncStatus('error');
+    console.error(`Error escribiendo en ${hoja} (${accion}):`, e);
     return false;
   }
 }
@@ -92,7 +105,8 @@ async function sincronizar() {
     DB.productos = datos.Productos.slice(1).map(f => ({
       id: String(f[0]), ref: String(f[1]||''), nombre: String(f[2]||''),
       pcompra: Number(f[3])||0, pventa1: Number(f[4])||0,
-      pventa2: Number(f[5])||0, stock: Number(f[6])||0
+      pventa2: Number(f[5])||0, stock: Number(f[6])||0,
+      alegraId: String(f[7]||'')
     }));
   }
 
@@ -101,7 +115,10 @@ async function sincronizar() {
       id: String(f[0]), fecha: String(f[1]), hora: String(f[2]),
       total: Number(f[3])||0, ganancia: Number(f[4])||0,
       nota: String(f[5]||''), metodoPago: String(f[6]||'efectivo'),
-      items: parsearJSON(f[7])
+      items: parsearJSON(f[7]),
+      clienteNombre: String(f[8]||''), clienteCedula: String(f[9]||''),
+      clienteTipoDoc: String(f[10]||'CC'), clienteTelefono: String(f[11]||''),
+      alegraId: String(f[12]||''), alegraNumero: String(f[13]||'')
     }));
   }
 
@@ -171,8 +188,14 @@ async function inicializarSheets() {
   if (!datos) return;
   if (!datos.Productos || datos.Productos.length === 0)
     await sheetsEscribir('append', 'Productos', ['ID','Ref','Nombre','PCompra','PVenta1','PVenta2','Stock']);
-  if (!datos.Ventas || datos.Ventas.length === 0)
-    await sheetsEscribir('append', 'Ventas', ['ID','Fecha','Hora','Total','Ganancia','Nota','MetodoPago','Items']);
+  if (!datos.Ventas || datos.Ventas.length === 0) {
+    await sheetsEscribir('append', 'Ventas', ['ID','Fecha','Hora','Total','Ganancia','Nota','MetodoPago','Items','ClienteNombre','ClienteCedula','ClienteTipoDoc','ClienteTelefono','AlegraId','AlegraNumero']);
+  } else if (datos.Ventas[0] && datos.Ventas[0][8] !== 'ClienteNombre') {
+    // La hoja de Ventas ya existía de antes (sin columnas de cliente/Alegra):
+    // se le agregan los encabezados nuevos sin tocar las ventas ya guardadas.
+    const body = { action: 'update', sheet: 'Ventas', data: ['ClienteNombre','ClienteCedula','ClienteTipoDoc','ClienteTelefono','AlegraId','AlegraNumero'], row: 1, columna: 9 };
+    try { await fetchConTimeout(SCRIPT_URL, { method: 'POST', body: JSON.stringify(body) }); } catch (e) {}
+  }
   if (!datos.Usuarios || datos.Usuarios.length === 0) {
     await sheetsEscribir('append', 'Usuarios', ['Usuario','Contraseña','Rol']);
     await sheetsEscribir('append', 'Usuarios', ['admin','lubin2812','admin']);
@@ -1856,6 +1879,18 @@ async function confirmarVenta() {
   const nota=document.getElementById('venta-nota').value.trim();
   const metodoPago=document.querySelector('input[name="metodo-pago"]:checked').value;
 
+  const clienteNombre = document.getElementById('venta-cliente-nombre').value.trim();
+  const clienteCedula = document.getElementById('venta-cliente-cedula').value.trim();
+  const clienteTipoDoc = document.getElementById('venta-cliente-tipodoc').value;
+  const clienteTelefono = document.getElementById('venta-cliente-telefono').value.trim();
+  const tipoDocumentoEl = document.querySelector('input[name="tipo-documento"]:checked');
+  const tipoDocumento = tipoDocumentoEl ? tipoDocumentoEl.value : 'ninguno';
+
+  if (tipoDocumento === 'factura' && (!clienteNombre || !clienteCedula)) {
+    alert('Para facturar electrónicamente necesitas el nombre y la cédula/NIT del cliente. Si no los tienes, elige "Venta POS" o "No facturar".');
+    return;
+  }
+
   for (const item of carrito) {
     const p = DB.productos.find(x=>x.id===item.id);
     if (p) {
@@ -1865,12 +1900,46 @@ async function confirmarVenta() {
     }
   }
 
-  const venta={id:uid(),fecha,hora,total,ganancia,nota,metodoPago,items:carrito.map(i=>({...i}))};
+  const venta={
+    id:uid(),fecha,hora,total,ganancia,nota,metodoPago,items:carrito.map(i=>({...i})),
+    clienteNombre, clienteCedula, clienteTipoDoc, clienteTelefono,
+    alegraId:'', alegraNumero:''
+  };
   DB.ventas.push(venta);
-  await sheetsEscribir('append','Ventas',[venta.id,venta.fecha,venta.hora,venta.total,venta.ganancia,venta.nota,venta.metodoPago,JSON.stringify(venta.items)]);
+  await sheetsEscribir('append','Ventas',[venta.id,venta.fecha,venta.hora,venta.total,venta.ganancia,venta.nota,venta.metodoPago,JSON.stringify(venta.items),venta.clienteNombre,venta.clienteCedula,venta.clienteTipoDoc,venta.clienteTelefono,'','']);
 
   guardarLocal();
   mostrarToast(`Venta registrada · ${metodoPago==='transferencia'?'🏦':'💵'} ${fmt(total)}. Tócala en "Ventas de hoy" para imprimir el boucher.`);
+
+  // Facturamos en Alegra DESPUÉS de guardar la venta localmente, para que
+  // quede registrada de todas formas aunque Alegra falle o tarde.
+  if (tipoDocumento !== 'ninguno') {
+    try {
+      const fechaISO = ahora.getFullYear() + '-' + String(ahora.getMonth()+1).padStart(2,'0') + '-' + String(ahora.getDate()).padStart(2,'0');
+      const datosAlegra = {
+        tipoDocumento,
+        fecha: fechaISO,
+        items: venta.items.map(i => ({ alegraId: DB.productos.find(p=>p.id===i.id)?.alegraId, nombre: i.nombre, precio: i.precio, cantidad: i.cantidad })),
+        cliente: (clienteNombre || clienteCedula) ? { nombre: clienteNombre, cedula: clienteCedula, tipoDoc: clienteTipoDoc||'CC' } : null
+      };
+      const r = await fetchConTimeout(SCRIPT_URL, {
+        method:'POST',
+        body: JSON.stringify({ action:'facturarAlegra', sheet:'Ventas', venta: datosAlegra })
+      }, 30000);
+      const resp = await r.json();
+      if (resp.ok) {
+        venta.alegraId = resp.alegraId || '';
+        venta.alegraNumero = resp.alegraNumero || '';
+        mostrarToast(`Documento Alegra creado: ${venta.alegraNumero||venta.alegraId}`);
+        await sheetsEscribir('update','Ventas',[venta.id,venta.fecha,venta.hora,venta.total,venta.ganancia,venta.nota,venta.metodoPago,JSON.stringify(venta.items),venta.clienteNombre,venta.clienteCedula,venta.clienteTipoDoc,venta.clienteTelefono,venta.alegraId,venta.alegraNumero],venta.id);
+        guardarLocal();
+      } else {
+        mostrarToast(`⚠️ Venta guardada, pero Alegra falló: ${resp.error}`);
+      }
+    } catch (e) {
+      mostrarToast(`⚠️ Venta guardada, pero no se pudo contactar Alegra.`);
+    }
+  }
 
   carrito=[];
   renderCarrito();
@@ -1878,7 +1947,11 @@ async function confirmarVenta() {
   document.getElementById('venta-resultados').innerHTML='';
   resultadosVenta=[];
   document.getElementById('venta-nota').value='';
+  document.getElementById('venta-cliente-nombre').value='';
+  document.getElementById('venta-cliente-cedula').value='';
+  document.getElementById('venta-cliente-telefono').value='';
   document.querySelector('input[name="metodo-pago"][value="efectivo"]').checked=true;
+  document.querySelector('input[name="tipo-documento"][value="ninguno"]').checked=true;
   setTimeout(()=>document.getElementById('venta-search').focus(),150);
 }
 
@@ -1920,6 +1993,7 @@ function renderHistorial() {
       <td style="color:var(--dorado-oscuro);font-weight:500">${fmt(v.ganancia)}</td>
       <td><div style="display:flex;gap:6px">
         <button class="btn-secundario btn-ver-factura" data-id="${v.id}" style="padding:5px 9px"><i class="ti ti-receipt"></i></button>
+        ${v.alegraId?`<button class="btn-secundario btn-nota-credito" data-id="${v.id}" style="padding:5px 9px" title="Nota crédito"><i class="ti ti-receipt-refund"></i></button>`:''}
         <button class="btn-peligro btn-eliminar-venta" data-id="${v.id}" style="padding:5px 9px"><i class="ti ti-trash"></i></button>
       </div></td>
     </tr>`).join('');
@@ -1931,6 +2005,7 @@ function renderHistorial() {
   cont.querySelectorAll('.btn-ver-factura').forEach(b=>b.addEventListener('click',()=>{
     const v=DB.ventas.find(x=>x.id===b.dataset.id); if(v) abrirFactura(v);
   }));
+  cont.querySelectorAll('.btn-nota-credito').forEach(b=>b.addEventListener('click',()=>abrirModalNotaCredito(b.dataset.id)));
   cont.querySelectorAll('.btn-eliminar-venta').forEach(b=>b.addEventListener('click',()=>eliminarVenta(b.dataset.id)));
 }
 
@@ -1939,10 +2014,140 @@ async function eliminarVenta(id) {
   DB.ventas=DB.ventas.filter(v=>v.id!==id);
   guardarLocal();
   await sheetsEscribir('clear','Ventas',null,null);
-  await sheetsEscribir('append','Ventas',['ID','Fecha','Hora','Total','Ganancia','Nota','MetodoPago','Items']);
+  await sheetsEscribir('append','Ventas',['ID','Fecha','Hora','Total','Ganancia','Nota','MetodoPago','Items','ClienteNombre','ClienteCedula','ClienteTipoDoc','ClienteTelefono','AlegraId','AlegraNumero']);
   for (const v of DB.ventas)
-    await sheetsEscribir('append','Ventas',[v.id,v.fecha,v.hora,v.total,v.ganancia,v.nota,v.metodoPago,JSON.stringify(v.items)]);
+    await sheetsEscribir('append','Ventas',[v.id,v.fecha,v.hora,v.total,v.ganancia,v.nota,v.metodoPago,JSON.stringify(v.items),v.clienteNombre||'',v.clienteCedula||'',v.clienteTipoDoc||'',v.clienteTelefono||'',v.alegraId||'',v.alegraNumero||'']);
   renderHistorial(); renderDashboard(); mostrarToast('Venta eliminada');
+}
+
+// =============================================
+// NOTA CRÉDITO (sobre un documento ya facturado en Alegra)
+// =============================================
+let notaCreditoVentaActual = null;
+let notaCreditoItems = [];
+
+function abrirModalNotaCredito(ventaId) {
+  const v = DB.ventas.find(x => x.id === ventaId);
+  if (!v) return;
+  if (!v.alegraId) {
+    alert('Esta venta no tiene un documento de Alegra asociado, así que no se le puede hacer nota crédito desde aquí.');
+    return;
+  }
+
+  notaCreditoVentaActual = v;
+  notaCreditoItems = (v.items||[]).map(i => ({...i, cantidadCredito: i.cantidad}));
+
+  document.getElementById('nc-factura-info').textContent =
+    `Documento: ${v.alegraNumero||v.alegraId} · Cliente: ${v.clienteNombre||'Consumidor Final'} · Total original: ${fmt(v.total)}`;
+  document.getElementById('nc-motivo').value = '';
+  renderNotaCreditoItems();
+  abrirModal('modal-nota-credito');
+}
+
+function renderNotaCreditoItems() {
+  const cont = document.getElementById('nc-items-lista');
+  cont.innerHTML = notaCreditoItems.map((i, idx) => `
+    <div class="carrito-item">
+      <div class="item-nombre">
+        <strong>${esc(i.nombre)}</strong>
+        <span>Ref: ${esc(i.ref||'-')} · Vendido: ${i.cantidad}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <input type="number" min="0" max="${i.cantidad}" value="${i.cantidadCredito}" class="input-cantidad-nc" data-idx="${idx}">
+        <span class="item-total">${fmt(i.cantidadCredito*i.precio)}</span>
+      </div>
+    </div>`).join('');
+
+  cont.querySelectorAll('.input-cantidad-nc').forEach(input => {
+    input.addEventListener('input', () => {
+      const idx = parseInt(input.dataset.idx);
+      let val = parseInt(input.value)||0;
+      val = Math.max(0, Math.min(val, notaCreditoItems[idx].cantidad));
+      notaCreditoItems[idx].cantidadCredito = val;
+      actualizarTotalNotaCredito();
+    });
+  });
+  actualizarTotalNotaCredito();
+}
+
+function actualizarTotalNotaCredito() {
+  const total = notaCreditoItems.reduce((a,i)=>a+i.cantidadCredito*i.precio,0);
+  document.getElementById('nc-total').textContent = fmt(total);
+}
+
+async function confirmarNotaCredito() {
+  const v = notaCreditoVentaActual;
+  if (!v) return;
+
+  const itemsCredito = notaCreditoItems.filter(i => i.cantidadCredito > 0);
+  if (itemsCredito.length === 0) { alert('Selecciona al menos un producto para acreditar.'); return; }
+
+  const motivo = document.getElementById('nc-motivo').value.trim();
+  const btn = document.getElementById('btn-confirmar-nota-credito');
+  btn.disabled = true; btn.textContent = 'Creando...';
+
+  try {
+    const ahora = new Date();
+    const fechaISO = ahora.getFullYear() + '-' + String(ahora.getMonth()+1).padStart(2,'0') + '-' + String(ahora.getDate()).padStart(2,'0');
+    const datos = {
+      facturaId: v.alegraId,
+      fecha: fechaISO,
+      motivo,
+      items: itemsCredito.map(i => ({
+        alegraId: DB.productos.find(p=>p.id===i.id)?.alegraId,
+        precio: i.precio,
+        cantidad: i.cantidadCredito
+      }))
+    };
+
+    const r = await fetchConTimeout(SCRIPT_URL, {
+      method:'POST',
+      body: JSON.stringify({ action:'notaCreditoAlegra', sheet:'Ventas', notaCredito: datos })
+    }, 30000);
+    const resp = await r.json();
+
+    if (resp.ok) {
+
+      for (const item of itemsCredito) {
+        const p = DB.productos.find(x => x.id === item.id);
+        if (p) {
+          p.stock = p.stock + item.cantidadCredito;
+          const idxP = DB.productos.findIndex(x=>x.id===p.id);
+          await sheetsEscribir('update','Productos',[p.id,p.ref,p.nombre,p.pcompra,p.pventa1,p.pventa2,p.stock],idxP+2);
+        }
+      }
+
+      const totalCredito = itemsCredito.reduce((a,i)=>a+i.precio*i.cantidadCredito,0);
+      const gananciaCredito = itemsCredito.reduce((a,i)=>a+((i.precio-(i.pcompra||0))*i.cantidadCredito),0);
+      const ahoraNC = new Date();
+
+      const ventaDevolucion = {
+        id: uid(), fecha: fechaCO(ahoraNC), hora: horaCO(ahoraNC),
+        total: -totalCredito, ganancia: -gananciaCredito,
+        nota: `Nota crédito de ${v.alegraNumero||v.alegraId}${motivo?': '+motivo:''}`,
+        metodoPago: v.metodoPago,
+        items: itemsCredito.map(i => ({...i, cantidad: i.cantidadCredito, total: i.precio*i.cantidadCredito})),
+        clienteNombre: v.clienteNombre||'', clienteCedula: v.clienteCedula||'',
+        clienteTipoDoc: v.clienteTipoDoc||'', clienteTelefono: v.clienteTelefono||'',
+        alegraId: resp.notaCreditoId||'', alegraNumero: resp.notaCreditoNumero||''
+      };
+      DB.ventas.push(ventaDevolucion);
+      await sheetsEscribir('append','Ventas',[ventaDevolucion.id,ventaDevolucion.fecha,ventaDevolucion.hora,ventaDevolucion.total,ventaDevolucion.ganancia,ventaDevolucion.nota,ventaDevolucion.metodoPago,JSON.stringify(ventaDevolucion.items),ventaDevolucion.clienteNombre,ventaDevolucion.clienteCedula,ventaDevolucion.clienteTipoDoc,ventaDevolucion.clienteTelefono,ventaDevolucion.alegraId,ventaDevolucion.alegraNumero]);
+
+      guardarLocal();
+      renderDashboard();
+      renderHistorial();
+
+      mostrarToast(`Nota crédito creada: ${resp.notaCreditoNumero||resp.notaCreditoId} · Stock devuelto`);
+      cerrarModal('modal-nota-credito');
+    } else {
+      alert('No se pudo crear la nota crédito:\n\n' + resp.error);
+    }
+  } catch (e) {
+    alert('No se pudo contactar con Alegra para crear la nota crédito.\n\n' + (e && e.message ? e.message : e));
+  } finally {
+    btn.disabled = false; btn.textContent = 'Crear nota crédito';
+  }
 }
 
 // =============================================
@@ -2230,6 +2435,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('btn-limpiar-carrito').addEventListener('click',()=>{ carrito=[]; renderCarrito(); });
   document.getElementById('btn-confirmar-venta').addEventListener('click', confirmarVenta);
+  document.getElementById('btn-confirmar-nota-credito').addEventListener('click', confirmarNotaCredito);
 
   // Modal precio (carrito)
   document.getElementById('mpv-btn-precio1').addEventListener('click',()=>seleccionarPrecio(1));

@@ -120,6 +120,39 @@
                 </label>
               </div>
             </div>
+
+            <div class="metodo-pago-box">
+              <p>Documento electrónico (Alegra)</p>
+              <div class="metodo-pago-opciones">
+                <label>
+                  <input type="radio" name="tipo-documento" value="ninguno" checked="">
+                  No facturar
+                </label>
+                <label>
+                  <input type="radio" name="tipo-documento" value="pos">
+                  🧾 Venta POS
+                </label>
+                <label>
+                  <input type="radio" name="tipo-documento" value="factura">
+                  📄 Factura electrónica
+                </label>
+              </div>
+              <p style="font-size:11px;color:var(--texto2);margin-top:8px">Para "Factura electrónica" necesitas el nombre y la cédula/NIT del cliente. Para "Venta POS" son opcionales.</p>
+              <input type="text" id="venta-cliente-nombre" placeholder="Nombre del cliente (opcional para POS)" style="margin-top:8px">
+              <div style="display:flex;gap:8px">
+                <select id="venta-cliente-tipodoc" style="max-width:110px">
+                  <option value="CC">CC</option>
+                  <option value="CE">CE</option>
+                  <option value="TI">TI</option>
+                  <option value="PEP">PEP</option>
+                  <option value="PP">PP</option>
+                  <option value="NIT">NIT</option>
+                </select>
+                <input type="text" id="venta-cliente-cedula" placeholder="Cédula / NIT">
+              </div>
+              <input type="text" id="venta-cliente-telefono" placeholder="Teléfono (opcional)">
+            </div>
+
             <input type="text" id="venta-nota" placeholder="Nota opcional (ej: cliente especial)">
             <div id="venta-acciones">
               <button id="btn-limpiar-carrito" class="btn-peligro">Limpiar</button>
@@ -548,6 +581,27 @@
       <input type="number" id="ct-cantidad" min="1" value="1" style="font-size:22px;text-align:center;font-weight:600">
       <p style="font-size:11px;color:var(--texto3);margin-top:4px;margin-bottom:12px">Presiona Enter para agregar</p>
       <button class="btn-primary" id="btn-ct-agregar" style="width:100%">Agregar al traslado</button>
+    </div>
+  </div>
+
+  <!-- MODAL: Nota crédito -->
+  <div id="modal-nota-credito" class="modal-bg hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Nota crédito</h3>
+        <button class="btn-cerrar-modal" data-modal="modal-nota-credito">✕</button>
+      </div>
+      <p id="nc-factura-info" style="font-size:13px;color:var(--texto2);margin-bottom:10px"></p>
+      <p style="font-size:12px;color:var(--texto2);margin-bottom:6px">Ajusta las cantidades a acreditar (déjalas igual para anular el total):</p>
+      <div id="nc-items-lista" style="max-height:35vh;overflow-y:auto;margin-bottom:10px"></div>
+      <input type="text" id="nc-motivo" placeholder="Motivo (ej: devolución, error de facturación)">
+      <div style="margin:10px 0;font-weight:600;display:flex;justify-content:space-between">
+        <span>Total a acreditar:</span><span id="nc-total">$0</span>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn-cerrar-modal" data-modal="modal-nota-credito" style="flex:1">Cancelar</button>
+        <button class="btn-primary" id="btn-confirmar-nota-credito" style="flex:1">Crear nota crédito</button>
+      </div>
     </div>
   </div>
 

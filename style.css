@@ -343,7 +343,7 @@ input:focus, select:focus { border-color: var(--rosa-medio); background: var(--c
 #inv-search, #venta-search { border-radius: 20px; margin-bottom: 1rem; }
 
 /* MÉTODO DE PAGO */
-#metodo-pago-box {
+.metodo-pago-box, #metodo-pago-box {
   background: var(--blush-claro);
   border: 0.5px solid var(--borde);
   border-radius: 10px;
@@ -351,7 +351,7 @@ input:focus, select:focus { border-color: var(--rosa-medio); background: var(--c
   margin-bottom: 10px;
 }
 
-#metodo-pago-box p {
+.metodo-pago-box p, #metodo-pago-box p {
   font-size: 11px;
   color: var(--texto2);
   font-weight: 500;
@@ -360,13 +360,13 @@ input:focus, select:focus { border-color: var(--rosa-medio); background: var(--c
   margin-bottom: 10px;
 }
 
-#metodo-pago-opciones {
+.metodo-pago-opciones, #metodo-pago-opciones {
   display: flex;
   gap: 20px;
   flex-wrap: wrap;
 }
 
-#metodo-pago-opciones label {
+.metodo-pago-opciones label, #metodo-pago-opciones label {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -376,7 +376,7 @@ input:focus, select:focus { border-color: var(--rosa-medio); background: var(--c
   color: var(--texto);
 }
 
-#metodo-pago-opciones input[type="radio"] {
+.metodo-pago-opciones input[type="radio"], #metodo-pago-opciones input[type="radio"] {
   width: auto;
   margin-bottom: 0;
   accent-color: var(--rosa);
