@@ -4,6 +4,21 @@
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwuyKKRvMW1P2r3T8OmeujvvDCH__zHGBbGY6GAUNfD9jE9vw4xZzVBhcuc9nzBsFCymg/exec';
 
 // =============================================
+// BODEGAS (las 3 páginas se mueven mercancía entre sí)
+// =============================================
+// BODEGA_ACTUAL: cuál es ESTA página. CODIGO_INICIAL: último código ya usado en esta bodega
+// (el siguiente producto nuevo será CODIGO_INICIAL + 1). codigoMin: desde qué número empieza
+// la numeración de cada bodega (sirve para calcular el siguiente código cuando se crea
+// un producto allá desde un traslado).
+const BODEGA_ACTUAL  = 'llano';
+const CODIGO_INICIAL = 8353;   // último código usado; el siguiente producto nuevo será 8354
+const BODEGAS = {
+  soloagro:   { nombre: 'MULTIREPUESTOS SOLOAGRO',     codigoMin: 1,    url: 'https://script.google.com/macros/s/AKfycbxGWExWXXLN0lmWASnP52oQsq2m8ynW9-Ku6To07AQxMWS0S8bC5dfqu3Oj27gYXTKgVA/exec' },
+  mundohogar: { nombre: 'MUNDO HOGAR',                  codigoMin: 5000, url: 'https://script.google.com/macros/s/AKfycbzYx7UYaU-MEkU1hTsCtTKFMURNrYFJjwqUJkP69Fo7axJfTtvLxiC3fX7sv-vTmuAK/exec' },
+  llano:      { nombre: 'MULTIREPUESTOS DEL LLANO',     codigoMin: 8000, url: 'https://script.google.com/macros/s/AKfycbwuyKKRvMW1P2r3T8OmeujvvDCH__zHGBbGY6GAUNfD9jE9vw4xZzVBhcuc9nzBsFCymg/exec' }
+};
+
+// =============================================
 // ESTADO LOCAL
 // =============================================
 let DB = {
@@ -15,8 +30,10 @@ let DB = {
   anticipos: [],
   proveedores: [],
   gastos:    [],
+  costos:    [],
   traslados: [],
-  config:    { stockMin: 5, trasladoContador: 0 }
+  config:    { stockMin: 5, trasladoContador: 0, codigoContador: CODIGO_INICIAL },
+  equivalencias: []
 };
 
 let sesion              = null;
@@ -197,7 +214,9 @@ async function sincronizar(ventasDias) {
       saldoPendiente: (f[14]!==undefined&&f[14]!=='') ? Number(f[14]) : undefined,
       alegraId: String(f[15]||''), alegraNumero: String(f[16]||''),
       pagoRecibido: (f[17]!==undefined&&f[17]!=='') ? Number(f[17]) : undefined,
-      cambio: (f[18]!==undefined&&f[18]!=='') ? Number(f[18]) : undefined
+      cambio: (f[18]!==undefined&&f[18]!=='') ? Number(f[18]) : undefined,
+      pagoEf: (f[19]!==undefined&&f[19]!=='') ? Number(f[19]) : undefined,
+      pagoTr: (f[20]!==undefined&&f[20]!=='') ? Number(f[20]) : undefined
     }));
   }
 
@@ -252,20 +271,41 @@ async function sincronizar(ventasDias) {
     DB.gastos = datos.Gastos.slice(1).map(f => ({
       id: String(f[0]), categoria: String(f[1]||''), monto: Number(f[2])||0,
       metodoPago: String(f[3]||'efectivo'), fecha: isoAFechaCO(f[4]), hora: String(f[5]||''),
-      nota: String(f[6]||'')
+      nota: String(f[6]||''),
+      efectivo: (f[7]!==undefined&&f[7]!=='') ? Number(f[7]) : undefined,
+      transferencia: (f[8]!==undefined&&f[8]!=='') ? Number(f[8]) : undefined
+    }));
+  }
+
+  if (datos.Costos && datos.Costos.length > 1) {
+    DB.costos = datos.Costos.slice(1).map(f => ({
+      id: String(f[0]), categoria: String(f[1]||''), monto: Number(f[2])||0,
+      metodoPago: String(f[3]||'efectivo'), fecha: isoAFechaCO(f[4]), hora: String(f[5]||''),
+      nota: String(f[6]||''),
+      efectivo: (f[7]!==undefined&&f[7]!=='') ? Number(f[7]) : undefined,
+      transferencia: (f[8]!==undefined&&f[8]!=='') ? Number(f[8]) : undefined
     }));
   }
 
   if (datos.Traslados && datos.Traslados.length > 1) {
     DB.traslados = datos.Traslados.slice(1).map(f => ({
       id: String(f[0]), numero: String(f[1]||''), fecha: isoAFechaCO(f[2]), hora: String(f[3]||''),
-      items: parsearJSON(f[4])
+      items: parsearJSON(f[4]),
+      origen: String(f[5]||''), destino: String(f[6]||''), observaciones: String(f[7]||'')
     }));
   }
 
   if (datos.Config && datos.Config.length > 1) {
     DB.config.stockMin = Number(datos.Config[1][0]) || 5;
     DB.config.trasladoContador = Number(datos.Config[1][1]) || 0;
+    DB.config.codigoContador = Number(datos.Config[1][2]) || DB.config.codigoContador || CODIGO_INICIAL;
+  }
+
+  if (datos.Equivalencias && datos.Equivalencias.length > 1) {
+    DB.equivalencias = datos.Equivalencias.slice(1).map(f => ({
+      id: String(f[0]), bodega: String(f[1]||''), origenId: String(f[2]||''), origenRef: String(f[3]||''),
+      destinoId: String(f[4]||''), destinoRef: String(f[5]||''), destinoNombre: String(f[6]||'')
+    }));
   }
 
   guardarLocal();
@@ -279,7 +319,7 @@ async function inicializarSheets() {
   if (!datos.Productos || datos.Productos.length === 0)
     await sheetsEscribir('append', 'Productos', ['ID','Ref','Nombre','PCompra','PVenta1','PVenta2','Stock']);
   if (!datos.Ventas || datos.Ventas.length === 0)
-    await sheetsEscribir('append', 'Ventas', ['ID','Fecha','Hora','Total','Ganancia','Nota','MetodoPago','Items','ClienteId','ClienteNombre','ClienteCedula','ClienteTelefono','ClienteDireccion','PagadoAhora','SaldoPendiente','AlegraId','AlegraNumero','PagoRecibido','Cambio']);
+    await sheetsEscribir('append', 'Ventas', ['ID','Fecha','Hora','Total','Ganancia','Nota','MetodoPago','Items','ClienteId','ClienteNombre','ClienteCedula','ClienteTelefono','ClienteDireccion','PagadoAhora','SaldoPendiente','AlegraId','AlegraNumero','PagoRecibido','Cambio','PagoEfectivo','PagoTransferencia']);
   if (!datos.Usuarios || datos.Usuarios.length === 0) {
     await sheetsEscribir('append', 'Usuarios', ['Usuario','Contraseña','Rol']);
     await sheetsEscribir('append', 'Usuarios', ['admin','lubin2812','admin']);
@@ -293,13 +333,23 @@ async function inicializarSheets() {
   if (!datos.Proveedores || datos.Proveedores.length === 0)
     await sheetsEscribir('append', 'Proveedores', ['ID','Empresa','FechaLlegadaPedido','Monto','NumeroCuotas','FechaLimite','Fecha','Hora','Abonos','Pagada']);
   if (!datos.Gastos || datos.Gastos.length === 0)
-    await sheetsEscribir('append', 'Gastos', ['ID','Categoria','Monto','MetodoPago','Fecha','Hora','Nota']);
+    await sheetsEscribir('append', 'Gastos', ['ID','Categoria','Monto','MetodoPago','Fecha','Hora','Nota','Efectivo','Transferencia']);
+  if (!datos.Costos || datos.Costos.length === 0)
+    await sheetsEscribir('append', 'Costos', ['ID','Categoria','Monto','MetodoPago','Fecha','Hora','Nota','Efectivo','Transferencia']);
   if (!datos.Traslados || datos.Traslados.length === 0)
-    await sheetsEscribir('append', 'Traslados', ['ID','Numero','Fecha','Hora','Items']);
+    await sheetsEscribir('append', 'Traslados', ['ID','Numero','Fecha','Hora','Items','BodegaOrigen','BodegaDestino','Observaciones']);
+  else if (datos.Traslados[0] && String(datos.Traslados[0][5]||'') !== 'BodegaOrigen')
+    await sheetsEscribir('update', 'Traslados', ['BodegaOrigen','BodegaDestino','Observaciones'], 1, 6);
   if (!datos.Config || datos.Config.length === 0) {
-    await sheetsEscribir('append', 'Config', ['StockMin','TrasladoContador']);
-    await sheetsEscribir('append', 'Config', [5, 0]);
+    await sheetsEscribir('append', 'Config', ['StockMin','TrasladoContador','CodigoContador']);
+    await sheetsEscribir('append', 'Config', [5, 0, CODIGO_INICIAL]);
+  } else if (datos.Config[0] && String(datos.Config[0][2]||'') !== 'CodigoContador') {
+    // Hoja Config vieja: se agrega la columna del contador de códigos (arranca en CODIGO_INICIAL; el siguiente código será CODIGO_INICIAL + 1).
+    await sheetsEscribir('update', 'Config', ['CodigoContador'], 1, 3);
+    await sheetsEscribir('update', 'Config', [CODIGO_INICIAL], 2, 3);
   }
+  if (!datos.Equivalencias || datos.Equivalencias.length === 0)
+    await sheetsEscribir('append', 'Equivalencias', ['ID','Bodega','OrigenId','OrigenRef','DestinoId','DestinoRef','DestinoNombre']);
   await sincronizar(VENTAS_DIAS_SYNC_LIGERO);
 }
 
@@ -542,6 +592,7 @@ async function mostrarPanelInterno(panel) {
   if (panel === 'anticipos')  renderAnticipos();
   if (panel === 'proveedores') renderProveedores();
   if (panel === 'gastos')     renderGastos();
+  if (panel === 'costos')     renderCostos();
   // El sync automático solo trae ventas recientes; Historial/Reportes pueden
   // necesitar cualquier fecha pasada, así que aquí sí se trae el historial completo.
   if (panel === 'historial')  { renderHistorial(); await sincronizar(); renderHistorial(); }
@@ -702,7 +753,7 @@ function renderTraslado() {
 // a mitad de camino podía encontrar el sheet sin valores y devolver el
 // contador en 0, reiniciando la numeración de traslados).
 async function guardarConfigSheet() {
-  await sheetsEscribir('update','Config',[DB.config.stockMin, DB.config.trasladoContador], 2);
+  await sheetsEscribir('update','Config',[DB.config.stockMin, DB.config.trasladoContador, DB.config.codigoContador], 2);
 }
 
 async function siguienteNumeroTraslado() {
@@ -721,65 +772,317 @@ function prepararImpresion(idContenedor) {
   document.getElementById(idContenedor).classList.add('activo');
 }
 
-function construirHtmlTrasladoPrint(numero, fecha, hora, items) {
-  const filas = items.map((i, idx) => `
+// Datos de la empresa que salen en el encabezado del traslado impreso.
+// Si algún dato queda vacío ('') esa línea simplemente no se imprime.
+const EMPRESA_TRASLADO = {
+  nombre:    'MULTIREPUESTOS DEL LLANO',
+  nit:       '',   // pon aquí el NIT para que salga en el traslado impreso
+  direccion: '',
+  telefono:  '',
+  ciudad:    ''
+};
+const BODEGA_ORIGEN_DEFECTO = BODEGAS[BODEGA_ACTUAL].nombre;
+const BODEGA_DESTINO_DEFECTO = 'MULTIREPUESTOS SOLOAGRO 2';
+
+function datosExtraTraslado() {
+  const val = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  return { origen: val('traslado-origen'), destino: val('traslado-destino'), observaciones: val('traslado-observaciones') };
+}
+
+function construirHtmlTrasladoPrint(numero, fecha, hora, items, extra) {
+  extra = extra || {};
+  const e = EMPRESA_TRASLADO;
+  const origen  = extra.origen  || BODEGA_ORIGEN_DEFECTO;
+  const destino = extra.destino || BODEGA_DESTINO_DEFECTO;
+  const unidades = items.reduce((a,i) => a + i.cantidad, 0);
+
+  const filas = items.map(i => `
     <tr>
-      <td>${idx+1}</td>
       <td>${esc(i.codigo)}</td>
       <td>${esc(i.nombre)}</td>
-      <td style="text-align:center">${i.cantidad}</td>
-      <td>${fmt(i.precio)}</td>
+      <td>${esc(destino)}</td>
+      <td class="tpd-der">${i.cantidad}</td>
+      <td class="tpd-der">${fmt(i.precio||0)}</td>
     </tr>`).join('');
 
+  const fila = (k, v) => v ? `<tr><th>${k}</th><td>${esc(v)}</td></tr>` : '';
+
   return `
-    <div id="tp-header">
-      <h1>Multirepuestos del Llano</h1>
-      <p>Traslado de productos</p>
-      <p style="font-weight:600;margin-top:4px">${numero}</p>
-    </div>
-    <div id="tp-meta">
-      <span><strong>Fecha:</strong> ${fecha}</span>
-      <span><strong>Hora:</strong> ${hora}</span>
-    </div>
-    <table>
-      <thead><tr><th>#</th><th>Código</th><th>Nombre</th><th>Cantidad</th><th>Precio</th></tr></thead>
-      <tbody>${filas}</tbody>
-    </table>
-    <p style="margin-top:12px;font-size:13px"><strong>Total de productos:</strong> ${items.length}</p>
-    <div id="tp-firmas">
-      <div class="tp-firma"><div class="tp-linea"></div><span>Quien realiza el traslado</span></div>
-      <div class="tp-firma"><div class="tp-linea"></div><span>Quien recibe</span></div>
+    <div class="tpd-pagina">
+      <div class="tpd-cabecera">
+        <div class="tpd-empresa">
+          <strong>${esc(e.nombre)}</strong>
+          ${e.nit ? `<span>NIT : ${esc(e.nit)}</span>` : ''}
+          ${e.direccion ? `<span>${esc(e.direccion)}</span>` : ''}
+          ${e.telefono ? `<span>${esc(e.telefono)}</span>` : ''}
+          ${e.ciudad ? `<span>${esc(e.ciudad)}</span>` : ''}
+        </div>
+        <div class="tpd-numero"><span>Traslado</span><strong>${esc(numero)}</strong></div>
+      </div>
+
+      <div class="tpd-cajas">
+        <table class="tpd-caja">
+          ${fila('Señores', e.nombre)}${fila('NIT', e.nit)}${fila('Dirección', e.direccion)}${fila('Teléfono', e.telefono)}${fila('Ciudad', e.ciudad)}
+        </table>
+        <table class="tpd-caja">
+          ${fila('Fecha', fecha + ' ' + hora)}${fila('Bodega Desde', origen)}${fila('Bodega Hasta', destino || '—')}
+        </table>
+      </div>
+
+      <table class="tpd-tabla">
+        <thead><tr><th>Producto</th><th>Descripción</th><th>Bodega</th><th>Cantidad</th><th>Precio unitario</th></tr></thead>
+        <tbody>${filas}</tbody>
+        <tfoot><tr><td colspan="3" class="tpd-der"><strong>Totales (${items.length} productos)</strong></td><td class="tpd-der"><strong>${unidades}</strong></td><td></td></tr></tfoot>
+      </table>
+
+      <div class="tpd-obs"><strong>OBSERVACIONES</strong>${extra.observaciones ? `<div class="tpd-obs-texto">${esc(extra.observaciones)}</div>` : ''}</div>
+
+      <div class="tpd-pie">
+        <div class="tpd-firmas">
+          <div class="tpd-firma"><span>Elaborado por</span></div>
+          <div class="tpd-firma"><span>Aprobado por</span></div>
+        </div>
+        <div class="tpd-pag">Pagina : 1 de 1</div>
+      </div>
     </div>
   `;
 }
 
-async function guardarTrasladoRealizado(numero, fecha, hora, items) {
-  const registro = { id: uid(), numero, fecha, hora, items: items.map(i=>({...i})) };
+async function guardarTrasladoRealizado(numero, fecha, hora, items, extra) {
+  extra = extra || {};
+  const registro = { id: uid(), numero, fecha, hora, items: items.map(i=>({...i})), origen: extra.origen||'', destino: extra.destino||'', observaciones: extra.observaciones||'' };
   DB.traslados.push(registro);
   guardarLocal();
-  await sheetsEscribir('append','Traslados',[registro.id, registro.numero, registro.fecha, registro.hora, JSON.stringify(registro.items)]);
+  await sheetsEscribir('append','Traslados',[registro.id, registro.numero, registro.fecha, registro.hora, JSON.stringify(registro.items), registro.origen, registro.destino, registro.observaciones]);
   return registro;
+}
+
+
+function normTexto(s) {
+  return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
+}
+
+// Lee los productos de la otra bodega. Devuelve { header, prods }: cada producto trae su fila cruda (raw)
+// para poder reescribirla completa sin depender de qué columnas soporte el Code.gs de esa bodega.
+async function leerProductosBodega(b) {
+  const r = await fetchConTimeout(b.url + '?action=getAll&ventasDias=1', {}, 30000);
+  const j = await r.json();
+  if (!j || j.ok !== true || !j.data || !Array.isArray(j.data.Productos) || !j.data.Productos.length) throw new Error('No se pudieron leer los productos de ' + b.nombre);
+  const header = j.data.Productos[0].map(h => String(h||''));
+  const col = (re, def) => { const i = header.findIndex(h => re.test(normTexto(h))); return i >= 0 ? i : def; };
+  const idx = { id: 0, ref: col(/^(ref|referencia|codigo)$/, 1), nombre: col(/^(nombre|producto|descripcion)$/, 2), stock: col(/^(stock|existencia|existencias|cantidad)$/, 6), barras: col(/barras/, 9) };
+  const prods = j.data.Productos.slice(1).map(f => ({
+    id: String(f[0]), ref: String(f[idx.ref]||''), nombre: String(f[idx.nombre]||''), pcompra: Number(f[3])||0,
+    pventa1: Number(f[4])||0, pventa2: Number(f[5])||0, stock: Number(f[idx.stock])||0,
+    codigoBarras: String(f[idx.barras]||''), raw: f.slice()
+  })).filter(p => p.id);
+  return { header, idx, prods };
+}
+
+async function escribirEnBodega(b, accion, hoja, datos, id, columna) {
+  const body = { action: accion, sheet: hoja, data: datos };
+  if (id) body.id = id;
+  if (columna) body.columna = columna;
+  const r = await fetchConTimeout(b.url, { method: 'POST', body: JSON.stringify(body) }, 30000);
+  const j = await r.json();
+  if (!j || j.ok !== true) throw new Error((j && j.error) || 'La otra bodega rechazó la operación');
+  return true;
+}
+
+// Siguiente código libre en la numeración de la otra bodega (Llano desde 8001, Mundo Hogar desde 5001).
+// Toma el número más alto que haya en esa bodega (ignorando códigos por debajo del rango) y suma 1; respeta un prefijo si lo tiene.
+function siguienteCodigoBodega(b, destProds, extras) {
+  let mejor = null;
+  destProds.map(d => d.ref).concat(extras || []).forEach(r => {
+    const m = /^(\D*)(\d+)$/.exec(String(r).trim());
+    if (!m) return;
+    const n = parseInt(m[2], 10);
+    if (n < b.codigoMin) return;
+    if (!mejor || n > mejor.n) mejor = { p: m[1], n };
+  });
+  return mejor ? mejor.p + (mejor.n + 1) : String(b.codigoMin + 1);
+}
+
+// Busca el producto equivalente: 1) equivalencia guardada, 2) código de barras, 3) nombre igual.
+function buscarParejaEnBodega(clave, p, destProds) {
+  const eq = DB.equivalencias.find(e => e.bodega === clave && e.origenId === p.id);
+  if (eq) { const d = destProds.find(x => x.id === eq.destinoId); if (d) return d; }
+  if (p.codigoBarras) { const d = destProds.find(x => x.codigoBarras && x.codigoBarras === p.codigoBarras); if (d) return d; }
+  const n = normTexto(p.nombre);
+  const iguales = destProds.filter(x => normTexto(x.nombre) === n);
+  return iguales.length === 1 ? iguales[0] : null;
+}
+
+// Ventana para elegir/crear el equivalente de los productos sin pareja. Devuelve true si se confirmó.
+function pedirParejasTraslado(b, pendientes, destProds) {
+  return new Promise(resolve => {
+    const cont = document.getElementById('match-contenido');
+    document.getElementById('match-titulo').textContent = 'Productos sin pareja en ' + b.nombre;
+    const pinta = () => {
+      cont.innerHTML = pendientes.map((it, i) => `
+        <div style="border:1px solid var(--borde);border-radius:10px;padding:10px;margin-bottom:10px">
+          <div style="font-weight:600">${esc(it.p.nombre)} <span style="font-weight:400;color:var(--texto2)">· cód ${esc(it.p.ref)} · ${it.cantidad} und</span></div>
+          <div style="font-size:13px;margin:4px 0;${it.sel ? 'color:#1B6B43' : 'color:var(--texto2)'}">${
+            !it.sel ? 'Sin elegir' : it.sel.tipo === 'existe' ? '✓ Será: ' + esc(it.sel.prod.nombre) + ' (cód ' + esc(it.sel.prod.ref) + ', stock ' + it.sel.prod.stock + ')' : '✓ Se creará como nuevo con el código ' + esc(it.sel.ref) + ' (el siguiente de ' + esc(b.nombre) + ')'}</div>
+          <input type="text" class="match-buscar" data-i="${i}" placeholder="Buscar en ${esc(b.nombre)} por nombre o código...">
+          <div class="match-res" id="match-res-${i}"></div>
+          <button class="btn-secundario match-nuevo" data-i="${i}" style="margin-top:6px">Crear como nuevo en ${esc(b.nombre)}</button>
+        </div>`).join('');
+    };
+    pinta();
+    const cierra = ok => {
+      cerrarModal('modal-traslado-match');
+      cont.onclick = cont.oninput = null;
+      document.getElementById('btn-match-confirmar').onclick = null;
+      document.getElementById('btn-match-cancelar').onclick = null;
+      document.getElementById('btn-match-x').onclick = null;
+      resolve(ok);
+    };
+    cont.oninput = e => {
+      if (!e.target.classList.contains('match-buscar')) return;
+      const i = +e.target.dataset.i;
+      const toks = normTexto(e.target.value).split(' ').filter(Boolean);
+      const box = document.getElementById('match-res-' + i);
+      if (!toks.length) { box.innerHTML = ''; return; }
+      const res = destProds.filter(d => { const t = normTexto(d.nombre + ' ' + d.ref + ' ' + d.codigoBarras); return toks.every(k => t.includes(k)); }).slice(0, 6);
+      box.innerHTML = res.length ? res.map(d => `<button type="button" class="btn-secundario match-pick" data-i="${i}" data-id="${esc(d.id)}" style="display:block;width:100%;text-align:left;margin-top:4px">${esc(d.nombre)} <span style="color:var(--texto2)">· cód ${esc(d.ref)} · stock ${d.stock}</span></button>`).join('') : '<p style="font-size:12px;color:var(--texto2)">Sin resultados</p>';
+    };
+    cont.onclick = e => {
+      const pick = e.target.closest('.match-pick');
+      if (pick) { pendientes[+pick.dataset.i].sel = { tipo: 'existe', prod: destProds.find(d => d.id === pick.dataset.id) }; pinta(); return; }
+      const nuevo = e.target.closest('.match-nuevo');
+      if (nuevo) {
+        const it = pendientes[+nuevo.dataset.i];
+        // El código se asigna solo: el siguiente de la numeración de esa bodega.
+        const reservados = pendientes.filter(o => o !== it && o.sel && o.sel.tipo === 'nuevo').map(o => o.sel.ref);
+        it.sel = { tipo: 'nuevo', ref: siguienteCodigoBodega(b, destProds, reservados) }; pinta();
+      }
+    };
+    document.getElementById('btn-match-confirmar').onclick = () => {
+      if (pendientes.some(it => !it.sel)) { alert('Falta elegir la pareja de todos los productos.'); return; }
+      cierra(true);
+    };
+    document.getElementById('btn-match-cancelar').onclick = () => cierra(false);
+    document.getElementById('btn-match-x').onclick = () => cierra(false);
+    abrirModal('modal-traslado-match');
+  });
+}
+
+// Mueve el stock: suma en la otra bodega y descuenta aquí. Si algo falla en la otra bodega, deshace lo que alcanzó a escribir.
+async function moverStockTraslado(clave) {
+  const b = BODEGAS[clave];
+  // 1) Productos de aquí
+  const lineas = [];
+  for (const it of traslado) {
+    const p = DB.productos.find(x => x.ref === it.codigo);
+    if (!p) throw new Error('El producto ' + it.codigo + ' ya no existe en el inventario.');
+    if (it.cantidad > p.stock) throw new Error('Solo hay ' + p.stock + ' de ' + p.nombre + ' y quieres trasladar ' + it.cantidad + '.');
+    lineas.push({ p, cantidad: it.cantidad, dest: null, sel: null });
+  }
+  // 2) Productos de allá y parejas
+  const lectura = await leerProductosBodega(b);
+  const destProds = lectura.prods;
+  lineas.forEach(l => { l.dest = buscarParejaEnBodega(clave, l.p, destProds); });
+  const pendientes = lineas.filter(l => !l.dest).map(l => ({ p: l.p, cantidad: l.cantidad, sel: null, linea: l }));
+  if (pendientes.length) {
+    const ok = await pedirParejasTraslado(b, pendientes, destProds);
+    if (!ok) return false;
+    pendientes.forEach(pe => { if (pe.sel.tipo === 'existe') pe.linea.dest = pe.sel.prod; else pe.linea.nuevoRef = pe.sel.ref; });
+  }
+  // 3) Escribir en la otra bodega (agrupando por producto destino). Se reescribe la fila completa
+  //    (sin usar "columna") para que funcione con cualquier versión del Code.gs de esa bodega.
+  const hechos = [];
+  const filaConStock = (d, stock) => { const f = d.raw.slice(); f[lectura.idx.stock] = stock; return f; };
+  try {
+    const porDestino = new Map();
+    lineas.forEach(l => {
+      if (l.dest) { const e = porDestino.get(l.dest.id) || { dest: l.dest, cant: 0 }; e.cant += l.cantidad; porDestino.set(l.dest.id, e); }
+    });
+    const esperados = new Map();
+    for (const e of porDestino.values()) {
+      await escribirEnBodega(b, 'update', 'Productos', filaConStock(e.dest, e.dest.stock + e.cant), e.dest.id);
+      hechos.push({ tipo: 'update', id: e.dest.id, fila: e.dest.raw.slice() });
+      esperados.set(e.dest.id, e.dest.stock + e.cant);
+    }
+    for (const l of lineas.filter(x => !x.dest)) {
+      const id = uid();
+      const fila = new Array(Math.max(lectura.header.length, 10)).fill('');
+      fila[0] = id; fila[lectura.idx.ref] = l.nuevoRef; fila[lectura.idx.nombre] = l.p.nombre;
+      fila[3] = l.p.pcompra; fila[4] = l.p.pventa1; fila[5] = l.p.pventa2; fila[lectura.idx.stock] = l.cantidad; fila[lectura.idx.barras] = l.p.codigoBarras || '';
+      await escribirEnBodega(b, 'append', 'Productos', fila);
+      hechos.push({ tipo: 'append', id });
+      esperados.set(id, l.cantidad);
+    }
+    // Verificación: se vuelve a leer la otra bodega y se comprueba que el stock quedó guardado.
+    const despues = (await leerProductosBodega(b)).prods;
+    for (const [id, stockEsperado] of esperados) {
+      const d = despues.find(x => x.id === id);
+      if (!d || d.stock !== stockEsperado) throw new Error('la otra bodega no guardó el cambio de stock (revisa que su Code.gs esté desplegado)');
+    }
+  } catch (err) {
+    for (const h of hechos.reverse()) {
+      try { h.tipo === 'update' ? await escribirEnBodega(b, 'update', 'Productos', h.fila, h.id) : await escribirEnBodega(b, 'delete', 'Productos', null, h.id); } catch (e2) {}
+    }
+    throw new Error('No se pudo sumar el stock en ' + b.nombre + ' (' + (err && err.message ? err.message : err) + '). No se descontó nada aquí.');
+  }
+  // 4) Guardar equivalencias nuevas
+  for (const pe of pendientes) {
+    if (pe.sel.tipo !== 'existe') continue;
+    const eq = { id: uid(), bodega: clave, origenId: pe.p.id, origenRef: pe.p.ref, destinoId: pe.sel.prod.id, destinoRef: pe.sel.prod.ref, destinoNombre: pe.sel.prod.nombre };
+    DB.equivalencias.push(eq);
+    await sheetsEscribir('append', 'Equivalencias', [eq.id, eq.bodega, eq.origenId, eq.origenRef, eq.destinoId, eq.destinoRef, eq.destinoNombre]);
+  }
+  // 5) Descontar aquí
+  const fallos = [];
+  for (const l of lineas) {
+    l.p.stock = Math.max(0, l.p.stock - l.cantidad);
+    const ok = await sheetsEscribir('update', 'Productos', [l.p.stock], l.p.id, 7);
+    if (!ok) fallos.push(l.p.nombre);
+  }
+  guardarLocal();
+  if (typeof renderInventario === 'function') renderInventario();
+  if (fallos.length) alert('OJO: el stock ya se sumó en ' + b.nombre + ' pero NO se pudo descontar aquí en Google Sheets para: ' + fallos.join(', ') + '. Ajusta ese stock a mano.');
+  return true;
 }
 
 async function imprimirTraslado() {
   if (traslado.length === 0) { alert('Agrega productos al traslado antes de imprimir'); return; }
+
+  const btnImp = document.getElementById('btn-imprimir-traslado');
+  const clave = document.getElementById('traslado-bodega').value;
+  if (clave) {
+    if (btnImp.disabled) return;
+    btnImp.disabled = true;
+    try {
+      mostrarToast('Moviendo stock a ' + BODEGAS[clave].nombre + '...');
+      const ok = await moverStockTraslado(clave);
+      if (!ok) { btnImp.disabled = false; return; }
+      mostrarToast('Stock movido ✓');
+    } catch (e) {
+      btnImp.disabled = false;
+      alert('NO SE HIZO EL TRASLADO.\n\n' + (e && e.message ? e.message : e));
+      return;
+    }
+    btnImp.disabled = false;
+  }
 
   const numero = await siguienteNumeroTraslado();
   const ahora = new Date();
   const fecha = fechaCO(ahora);
   const hora  = horaCO(ahora);
 
-  await guardarTrasladoRealizado(numero, fecha, hora, traslado);
+  const extra = datosExtraTraslado();
+  await guardarTrasladoRealizado(numero, fecha, hora, traslado, extra);
   renderTrasladosHistorial();
 
-  document.getElementById('traslado-print-contenido').innerHTML = construirHtmlTrasladoPrint(numero, fecha, hora, traslado);
+  document.getElementById('traslado-print-contenido').innerHTML = construirHtmlTrasladoPrint(numero, fecha, hora, traslado, extra);
   prepararImpresion('traslado-print');
   window.print();
 }
 
 function reimprimirTraslado(registro) {
   document.getElementById('traslado-print-contenido').innerHTML =
-    construirHtmlTrasladoPrint(registro.numero, registro.fecha, registro.hora, registro.items);
+    construirHtmlTrasladoPrint(registro.numero, registro.fecha, registro.hora, registro.items, registro);
   prepararImpresion('traslado-print');
   window.print();
 }
@@ -2284,6 +2587,9 @@ function abrirModalGasto() {
   document.getElementById('gasto-monto').value = '';
   document.getElementById('gasto-nota').value = '';
   document.querySelector('input[name="gasto-metodo"][value="efectivo"]').checked = true;
+  document.getElementById('gasto-mixto-efectivo').value = 0;
+  document.getElementById('gasto-mixto-transferencia').value = 0;
+  document.getElementById('gasto-mixto-box').classList.add('hidden');
   abrirModal('modal-gasto');
 }
 
@@ -2294,16 +2600,77 @@ async function guardarGasto() {
   if (!gastoCategoriaSeleccionada) { alert('Selecciona una categoría de gasto'); return; }
   if (!monto || monto<=0) { alert('Ingresa un monto válido'); return; }
 
+  let efectivo, transferencia;
+  if (metodoPago === 'mixto') {
+    efectivo = parseFloat(document.getElementById('gasto-mixto-efectivo').value)||0;
+    transferencia = parseFloat(document.getElementById('gasto-mixto-transferencia').value)||0;
+    if (efectivo < 0 || transferencia < 0 || Math.round(efectivo+transferencia) !== Math.round(monto)) {
+      alert('El pago combinado no cuadra: efectivo + transferencia debe ser igual al monto del gasto.');
+      return;
+    }
+  }
+
   const ahora = new Date();
-  const gasto = { id: uid(), categoria: gastoCategoriaSeleccionada, monto, metodoPago, fecha: fechaCO(ahora), hora: horaCO(ahora), nota };
+  const gasto = { id: uid(), categoria: gastoCategoriaSeleccionada, monto, metodoPago, fecha: fechaCO(ahora), hora: horaCO(ahora), nota, efectivo, transferencia };
   DB.gastos.push(gasto);
-  await sheetsEscribir('append','Gastos',[gasto.id,gasto.categoria,gasto.monto,gasto.metodoPago,gasto.fecha,gasto.hora,gasto.nota]);
+  await sheetsEscribir('append','Gastos',[gasto.id,gasto.categoria,gasto.monto,gasto.metodoPago,gasto.fecha,gasto.hora,gasto.nota,efectivo!=null?efectivo:'',transferencia!=null?transferencia:'']);
 
   guardarLocal();
   cerrarModal('modal-gasto');
   renderGastos();
   renderDashboard();
   mostrarToast('Gasto registrado ✓');
+}
+
+// ---- Reparto efectivo / transferencia (incluye pago combinado) ----
+function partesVenta(v) {
+  const total = v.total || 0, gan = v.ganancia || 0;
+  let tr = 0;
+  if (v.metodoPago === 'transferencia') tr = total;
+  else if (v.metodoPago === 'mixto' && v.pagoTr != null) tr = Math.min(total, Math.max(0, v.pagoTr));
+  const f = total ? tr / total : 0;
+  return { ef: total - tr, tr, gEf: gan - gan * f, gTr: gan * f };
+}
+function partesGasto(g) {
+  const monto = g.monto || 0;
+  let tr = 0;
+  if (g.metodoPago === 'transferencia') tr = monto;
+  else if (g.metodoPago === 'mixto' && g.transferencia != null) tr = Math.min(monto, Math.max(0, g.transferencia));
+  return { ef: monto - tr, tr };
+}
+function resumenMetodos(ventas, gastos, costos) {
+  costos = costos || [];
+  const r = { vendido:0, ganancia:0, vEf:0, vTr:0, gaEf:0, gaTr:0, gasto:0, gsEf:0, gsTr:0, costo:0, csEf:0, csTr:0 };
+  ventas.forEach(v => { const p = partesVenta(v); r.vendido += v.total; r.ganancia += v.ganancia; r.vEf += p.ef; r.vTr += p.tr; r.gaEf += p.gEf; r.gaTr += p.gTr; });
+  gastos.forEach(g => { const p = partesGasto(g); r.gasto += g.monto; r.gsEf += p.ef; r.gsTr += p.tr; });
+  costos.forEach(c => { const p = partesGasto(c); r.costo += c.monto; r.csEf += p.ef; r.csTr += p.tr; });
+  r.netoEf = r.gaEf - r.gsEf - r.csEf; r.netoTr = r.gaTr - r.gsTr - r.csTr; r.neto = r.ganancia - r.gasto - r.costo;
+  return r;
+}
+function badgeMetodo(x) {
+  if (x.metodoPago === 'mixto') {
+    const detalle = (x.metodoPago === 'mixto' && (x.efectivo != null || x.pagoEf != null))
+      ? `title="Efectivo ${fmt(x.efectivo != null ? x.efectivo : x.pagoEf)} · Transferencia ${fmt(x.transferencia != null ? x.transferencia : x.pagoTr)}"` : '';
+    return `<span class="badge ok" ${detalle}>🔀 Combinado</span>`;
+  }
+  return `<span class="badge ${x.metodoPago==='transferencia'?'rosa':'verde'}">${x.metodoPago==='transferencia'?'🏦 Transferencia':'💵 Efectivo'}</span>`;
+}
+
+function gastoActualizarMixto() {
+  const mixto = document.querySelector('input[name="gasto-metodo"]:checked').value === 'mixto';
+  document.getElementById('gasto-mixto-box').classList.toggle('hidden', !mixto);
+  if (mixto) gastoMixtoDesde('monto');
+}
+function gastoMixtoDesde(origen) {
+  const monto = parseFloat(document.getElementById('gasto-monto').value)||0;
+  const ef = document.getElementById('gasto-mixto-efectivo');
+  const tr = document.getElementById('gasto-mixto-transferencia');
+  if (origen === 'tr') ef.value = Math.max(0, monto - (parseFloat(tr.value)||0));
+  else tr.value = Math.max(0, monto - (parseFloat(ef.value)||0));
+  const resto = monto - (parseFloat(ef.value)||0) - (parseFloat(tr.value)||0);
+  const info = document.getElementById('gasto-mixto-info');
+  info.textContent = Math.round(resto) === 0 ? 'Cuadra con el monto ✓' : `Falta repartir ${fmt(resto)}`;
+  info.style.color = Math.round(resto) === 0 ? 'var(--malva)' : '#A32D2D';
 }
 
 async function eliminarGasto(id) {
@@ -2320,8 +2687,8 @@ function renderGastos() {
     return d.getMonth()===ahora.getMonth() && d.getFullYear()===ahora.getFullYear();
   });
   const totalMes = gastosMes.reduce((a,g)=>a+g.monto,0);
-  const efectivoMes = gastosMes.filter(g=>g.metodoPago!=='transferencia').reduce((a,g)=>a+g.monto,0);
-  const transferenciaMes = gastosMes.filter(g=>g.metodoPago==='transferencia').reduce((a,g)=>a+g.monto,0);
+  const efectivoMes = gastosMes.reduce((a,g)=>a+partesGasto(g).ef,0);
+  const transferenciaMes = gastosMes.reduce((a,g)=>a+partesGasto(g).tr,0);
 
   document.getElementById('gastos-resumen').innerHTML = `
     <div id="dash-metrics">
@@ -2341,7 +2708,7 @@ function renderGastos() {
       <td>${g.fecha}</td>
       <td><span class="badge rosa">${esc(g.categoria)}</span></td>
       <td>${fmt(g.monto)}</td>
-      <td><span class="badge ${g.metodoPago==='transferencia'?'rosa':'verde'}">${g.metodoPago==='transferencia'?'🏦 Transferencia':'💵 Efectivo'}</span></td>
+      <td>${badgeMetodo(g)}</td>
       <td style="font-size:13px;color:var(--texto2)">${esc(g.nota)||'-'}</td>
       <td><button class="btn-peligro btn-eliminar-gasto" data-id="${g.id}" style="padding:5px 9px"><i class="ti ti-trash"></i></button></td>
     </tr>`).join('');
@@ -2351,6 +2718,130 @@ function renderGastos() {
     <tbody>${filas}</tbody></table></div>`;
 
   cont.querySelectorAll('.btn-eliminar-gasto').forEach(b => b.addEventListener('click', () => eliminarGasto(b.dataset.id)));
+}
+
+// =============================================
+// COSTOS (insumos: bolsas, empaques, fletes…)
+// =============================================
+let costoCategoriaSeleccionada = null;
+
+function seleccionarCategoriaCosto(cat, btn) {
+  costoCategoriaSeleccionada = cat;
+  document.querySelectorAll('.costo-cat-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+}
+
+function abrirModalCosto() {
+  costoCategoriaSeleccionada = null;
+  document.querySelectorAll('.costo-cat-btn').forEach(b => b.classList.remove('selected'));
+  document.getElementById('costo-monto').value = '';
+  document.getElementById('costo-nota').value = '';
+  document.querySelector('input[name="costo-metodo"][value="efectivo"]').checked = true;
+  document.getElementById('costo-mixto-efectivo').value = 0;
+  document.getElementById('costo-mixto-transferencia').value = 0;
+  document.getElementById('costo-mixto-box').classList.add('hidden');
+  abrirModal('modal-costo');
+}
+
+function costoActualizarMixto() {
+  const mixto = document.querySelector('input[name="costo-metodo"]:checked').value === 'mixto';
+  document.getElementById('costo-mixto-box').classList.toggle('hidden', !mixto);
+  if (mixto) costoMixtoDesde('monto');
+}
+function costoMixtoDesde(origen) {
+  const monto = parseFloat(document.getElementById('costo-monto').value)||0;
+  const ef = document.getElementById('costo-mixto-efectivo');
+  const tr = document.getElementById('costo-mixto-transferencia');
+  if (origen === 'tr') ef.value = Math.max(0, monto - (parseFloat(tr.value)||0));
+  else tr.value = Math.max(0, monto - (parseFloat(ef.value)||0));
+  const resto = monto - (parseFloat(ef.value)||0) - (parseFloat(tr.value)||0);
+  const info = document.getElementById('costo-mixto-info');
+  info.textContent = Math.round(resto) === 0 ? 'Cuadra con el monto ✓' : `Falta repartir ${fmt(resto)}`;
+  info.style.color = Math.round(resto) === 0 ? 'var(--malva)' : '#A32D2D';
+}
+
+async function guardarCosto() {
+  const monto = parseFloat(document.getElementById('costo-monto').value)||0;
+  const metodoPago = document.querySelector('input[name="costo-metodo"]:checked').value;
+  const nota = document.getElementById('costo-nota').value.trim();
+  if (!costoCategoriaSeleccionada) { alert('Selecciona una categoría de costo'); return; }
+  if (!monto || monto<=0) { alert('Ingresa un monto válido'); return; }
+
+  let efectivo, transferencia;
+  if (metodoPago === 'mixto') {
+    efectivo = parseFloat(document.getElementById('costo-mixto-efectivo').value)||0;
+    transferencia = parseFloat(document.getElementById('costo-mixto-transferencia').value)||0;
+    if (efectivo < 0 || transferencia < 0 || Math.round(efectivo+transferencia) !== Math.round(monto)) {
+      alert('El pago combinado no cuadra: efectivo + transferencia debe ser igual al monto del costo.');
+      return;
+    }
+  }
+
+  const ahora = new Date();
+  const costo = { id: uid(), categoria: costoCategoriaSeleccionada, monto, metodoPago, fecha: fechaCO(ahora), hora: horaCO(ahora), nota, efectivo, transferencia };
+  const ok = await sheetsEscribir('append','Costos',[costo.id,costo.categoria,costo.monto,costo.metodoPago,costo.fecha,costo.hora,costo.nota,efectivo!=null?efectivo:'',transferencia!=null?transferencia:'']);
+  DB.costos.push(costo);
+
+  guardarLocal();
+  cerrarModal('modal-costo');
+  renderCostos();
+  renderDashboard();
+  mostrarToast('Costo registrado ✓');
+}
+
+async function eliminarCosto(id) {
+  if (!confirm('¿Eliminar este costo?')) return;
+  await sheetsEscribir('delete','Costos',null,id);
+  DB.costos = DB.costos.filter(c => c.id!==id);
+  guardarLocal(); renderCostos(); renderDashboard(); mostrarToast('Costo eliminado');
+}
+
+function renderCostos() {
+  const ahora = new Date();
+  const costosMes = DB.costos.filter(c => {
+    const d = parseFechaCO(c.fecha);
+    return d.getMonth()===ahora.getMonth() && d.getFullYear()===ahora.getFullYear();
+  });
+  const totalMes = costosMes.reduce((a,c)=>a+c.monto,0);
+  const efectivoMes = costosMes.reduce((a,c)=>a+partesGasto(c).ef,0);
+  const transferenciaMes = costosMes.reduce((a,c)=>a+partesGasto(c).tr,0);
+
+  document.getElementById('costos-resumen').innerHTML = `
+    <div id="dash-metrics">
+      <div class="metric rosa"><div class="mlabel">Costos de este mes</div><div class="mvalue">${fmt(totalMes)}</div></div>
+      <div class="metric"><div class="mlabel">💵 Efectivo</div><div class="mvalue">${fmt(efectivoMes)}</div></div>
+      <div class="metric"><div class="mlabel">🏦 Transferencia</div><div class="mvalue">${fmt(transferenciaMes)}</div></div>
+    </div>`;
+
+  const porCat = {};
+  costosMes.forEach(c => { porCat[c.categoria] = (porCat[c.categoria] || 0) + c.monto; });
+  const cats = Object.keys(porCat).sort((a,b) => porCat[b]-porCat[a]);
+  document.getElementById('costos-categorias-mes').innerHTML = cats.length
+    ? `<p class="rep-seccion" style="margin-top:0">Por categoría este mes</p>
+       <div class="rep-neto-grid" style="margin-bottom:1.25rem">${cats.map(k=>`<div class="reporte-pago-card"><div class="rp-label">${esc(k)}</div><div class="rp-value">${fmt(porCat[k])}</div></div>`).join('')}</div>`
+    : '';
+
+  const cont = document.getElementById('costos-contenido');
+  if (DB.costos.length === 0) {
+    cont.innerHTML = `<div class="estado-vacio"><i class="ti ti-box-seam"></i><p>Sin costos registrados.</p></div>`;
+    return;
+  }
+
+  const filas = DB.costos.slice().reverse().map(c => `
+    <tr>
+      <td>${c.fecha}</td>
+      <td><span class="badge rosa">${esc(c.categoria)}</span></td>
+      <td>${fmt(c.monto)}</td>
+      <td>${badgeMetodo(c)}</td>
+      <td style="font-size:13px;color:var(--texto2)">${esc(c.nota)||'-'}</td>
+      <td><button class="btn-peligro btn-eliminar-costo" data-id="${c.id}" style="padding:5px 9px"><i class="ti ti-trash"></i></button></td>
+    </tr>`).join('');
+
+  cont.innerHTML = `<div class="tabla-wrap"><table>
+    <thead><tr><th>Fecha</th><th>Categoría</th><th>Monto</th><th>Método</th><th>Detalle</th><th></th></tr></thead>
+    <tbody>${filas}</tbody></table></div>`;
+
+  cont.querySelectorAll('.btn-eliminar-costo').forEach(b => b.addEventListener('click', () => eliminarCosto(b.dataset.id)));
 }
 
 // =============================================
@@ -2389,7 +2880,8 @@ function renderDashboard() {
   const ventasHoy = DB.ventas.filter(v => v.fecha === hoy);
   const totalVendidoBruto = ventasHoy.reduce((a,v) => a+v.total, 0);
   const gastosHoy = DB.gastos.filter(g => g.fecha === hoy).reduce((a,g) => a+g.monto, 0);
-  const totalVendido = totalVendidoBruto - gastosHoy;
+  const costosHoy = DB.costos.filter(c => c.fecha === hoy).reduce((a,c) => a+c.monto, 0);
+  const totalVendido = totalVendidoBruto - gastosHoy - costosHoy;
   const sinStock  = DB.productos.filter(p => p.stock <= 0).length;
   const stockBajo = DB.productos.filter(p => p.stock > 0 && p.stock <= DB.config.stockMin).length;
   const deudasVencidas = DB.deudores.filter(d => deudaVencida(d)).length;
@@ -2402,6 +2894,7 @@ function renderDashboard() {
   document.getElementById('dash-metrics').innerHTML = `
     <div class="metric rosa"><div class="mlabel">Total vendido hoy (neto)</div><div class="mvalue">${fmt(totalVendido)}</div></div>
     ${gastosHoy>0?`<div class="metric danger"><div class="mlabel">Gastos de hoy</div><div class="mvalue">${fmt(gastosHoy)}</div></div>`:''}
+    ${costosHoy>0?`<div class="metric danger"><div class="mlabel">Costos de hoy</div><div class="mvalue">${fmt(costosHoy)}</div></div>`:''}
     <div class="metric"><div class="mlabel">Transacciones</div><div class="mvalue">${ventasHoy.length}</div></div>
     <div class="metric"><div class="mlabel">Productos</div><div class="mvalue">${DB.productos.length}</div></div>
     ${stockBajo>0?`<div class="metric alerta metric-clickeable" data-stock="bajo"><div class="mlabel">Stock bajo</div><div class="mvalue">${stockBajo}</div></div>`:''}
@@ -2415,6 +2908,8 @@ function renderDashboard() {
   document.querySelectorAll('#dash-metrics .metric-clickeable').forEach(el =>
     el.addEventListener('click', () => mostrarModalStock(el.dataset.stock)));
 
+  renderTopResumen();
+
   const cont = document.getElementById('dash-ventas-hoy');
   if (ventasHoy.length === 0) {
     cont.innerHTML = `<div class="estado-vacio"><i class="ti ti-shopping-bag"></i><p>Sin ventas hoy. ¡A vender!</p></div>`;
@@ -2426,7 +2921,7 @@ function renderDashboard() {
       <td>${v.hora}</td>
       <td style="font-size:13px">${(v.items||[]).map(i=>esc(i.nombre)+' x'+i.cantidad).join(', ')}</td>
       <td style="font-size:13px;color:var(--texto2)">${v.nota||'-'}</td>
-      <td><span class="badge ${v.metodoPago==='transferencia'?'rosa':'verde'}">${v.metodoPago==='transferencia'?'🏦 Transferencia':'💵 Efectivo'}</span></td>
+      <td>${badgeMetodo(v)}</td>
       <td style="font-weight:500">${fmt(v.total)}</td>
       <td><i class="ti ti-receipt" style="color:var(--rosa-medio);font-size:16px"></i></td>
     </tr>`).join('');
@@ -2445,7 +2940,7 @@ function renderDashboard() {
 // =============================================
 // IMPRESIÓN TÉRMICA POS (QZ Tray + ESC/POS)
 // =============================================
-// La venta se imprime directamente en la CX-POS por QZ Tray.
+// La venta se imprime directamente en la impresora POS por QZ Tray.
 // La firma de QZ se configura EXTERNAMENTE en qz-security.js usando
 // Google Apps Script. La clave privada NUNCA debe estar en este archivo
 // ni en GitHub.
@@ -2941,6 +3436,34 @@ function imprimirEtiquetaProducto(id) {
   ventana.document.close();
 }
 
+// Siguiente código libre (arranca en 1279). No lo reserva: el contador solo
+// avanza cuando el producto se guarda de verdad.
+function siguienteCodigoProducto() {
+  let n = (Number(DB.config.codigoContador) || CODIGO_INICIAL) + 1;
+  const usados = new Set(DB.productos.map(p => String(p.ref)));
+  while (usados.has(String(n))) n++;
+  return String(n);
+}
+
+// Crea el producto recién guardado en Alegra (con unidad) para no tener que
+// correr "migrar productos" a mano. Si falla, el producto queda guardado igual.
+async function migrarProductoNuevoAAlegra(p) {
+  try {
+    const r = await fetchConTimeout(SCRIPT_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'migrarProductoAlegra', sheet: 'Productos', id: p.id })
+    }, 30000);
+    const resp = await r.json();
+    if (!resp || resp.ok !== true) throw new Error((resp && resp.error) || 'Alegra no respondió bien');
+    p.alegraId = String(resp.alegraId || '');
+    guardarLocal();
+    mostrarToast('Producto creado en Alegra ✓');
+  } catch (e) {
+    console.error('Migración a Alegra:', e);
+    mostrarToast('Producto guardado, pero NO se pudo crear en Alegra: ' + (e && e.message ? e.message : e));
+  }
+}
+
 function abrirModalProducto(id, codigoBarrasPrellenado) {
   editandoProductoId = id || null;
   document.getElementById('modal-prod-titulo').textContent = id ? 'Editar producto' : 'Agregar producto';
@@ -2956,13 +3479,18 @@ function abrirModalProducto(id, codigoBarrasPrellenado) {
     document.getElementById('prod-stock').value   = p.stock;
   } else {
     ['prod-codigobarras','prod-ref','prod-nombre','prod-pcompra','prod-pventa1','prod-pventa2','prod-stock'].forEach(x => document.getElementById(x).value='');
+    // El código de un producto nuevo se asigna solo: el siguiente número libre.
+    document.getElementById('prod-ref').value = siguienteCodigoProducto();
     // Si se llega aquí desde un escaneo de un código de fábrica que no
     // existe todavía, se deja ya escrito para no tener que digitarlo.
     if (codigoBarrasPrellenado) document.getElementById('prod-codigobarras').value = codigoBarrasPrellenado;
   }
+  // Producto nuevo: el código es automático y no se escribe. Al editar sí se puede corregir.
+  document.getElementById('prod-ref').readOnly = !id;
+  document.getElementById('prod-ref-aviso').classList.toggle('hidden', !!id);
   actualizarPcompraIva();
   abrirModal('modal-producto');
-  if (!id) setTimeout(() => document.getElementById(codigoBarrasPrellenado ? 'prod-ref' : 'prod-codigobarras').focus(), 100);
+  if (!id) setTimeout(() => document.getElementById(codigoBarrasPrellenado ? 'prod-nombre' : 'prod-codigobarras').focus(), 100);
 }
 
 // Muestra, solo como referencia (no se guarda en ningún lado), el precio de
@@ -2984,8 +3512,17 @@ async function guardarProducto() {
   const stock=parseInt(document.getElementById('prod-stock').value)||0;
   if (!ref||!nombre||!pventa1) { alert('Completa los campos obligatorios (*)'); return; }
 
+  // Si dos PC agregan productos casi al tiempo, el código podría haberse repetido: se recalcula.
+  if (!editandoProductoId && DB.productos.some(p => String(p.ref) === ref)) {
+    const nuevoCod = siguienteCodigoProducto();
+    document.getElementById('prod-ref').value = nuevoCod;
+    alert('Ese código ya lo tomó otro producto. Se asignó el siguiente libre: ' + nuevoCod + '. Presiona Guardar otra vez.');
+    return;
+  }
+
   const btn = document.getElementById('btn-guardar-producto');
   btn.textContent='Guardando...'; btn.disabled=true;
+  let nuevoParaAlegra = null;
 
   if (editandoProductoId) {
     const p = DB.productos.find(x => x.id===editandoProductoId);
@@ -3004,11 +3541,19 @@ async function guardarProducto() {
     // H y I se dejan en blanco (las llena la integración con Alegra); J es
     // el código de barras.
     await sheetsEscribir('append','Productos',[nuevo.id,nuevo.ref,nuevo.nombre,nuevo.pcompra,nuevo.pventa1,nuevo.pventa2,nuevo.stock,'','',nuevo.codigoBarras||'']);
+    // Avanza el contador de códigos (solo si el código fue numérico y mayor al actual).
+    const num = Number(nuevo.ref);
+    if (Number.isInteger(num) && num > (Number(DB.config.codigoContador) || 0)) {
+      DB.config.codigoContador = num;
+      await guardarConfigSheet();
+    }
+    nuevoParaAlegra = nuevo;
   }
 
   guardarLocal(); btn.textContent='Guardar'; btn.disabled=false;
   cerrarModal('modal-producto'); renderInventario();
   mostrarToast(editandoProductoId?'Producto actualizado ✓':'Producto agregado ✓');
+  if (nuevoParaAlegra) migrarProductoNuevoAAlegra(nuevoParaAlegra);
 }
 
 async function eliminarProducto(id) {
@@ -3396,10 +3941,12 @@ async function finalizarVenta(pagoEfectivoRecibido) {
     clienteCedula: clienteVenta?clienteVenta.cedula:'', clienteTelefono: clienteVenta?clienteVenta.telefono:'',
     clienteDireccion: clienteVenta?clienteVenta.direccion:'',
     alegraId: '', alegraNumero: '',
-    pagoRecibido: pagoEfectivoRecibido!=null?pagoEfectivoRecibido:undefined, cambio
+    pagoRecibido: pagoEfectivoRecibido!=null?pagoEfectivoRecibido:undefined, cambio,
+    pagoEf: metodoPago==='mixto' ? (parseFloat(document.getElementById('pago-mixto-efectivo').value)||0) : undefined,
+    pagoTr: metodoPago==='mixto' ? (parseFloat(document.getElementById('pago-mixto-transferencia').value)||0) : undefined
   };
   DB.ventas.push(venta);
-  await sheetsEscribir('append','Ventas',[venta.id,venta.fecha,venta.hora,venta.total,venta.ganancia,venta.nota,venta.metodoPago,JSON.stringify(venta.items),venta.clienteId,venta.clienteNombre,venta.clienteCedula,venta.clienteTelefono,venta.clienteDireccion,'','','','',venta.pagoRecibido!=null?venta.pagoRecibido:'',venta.cambio!=null?venta.cambio:'']);
+  await sheetsEscribir('append','Ventas',[venta.id,venta.fecha,venta.hora,venta.total,venta.ganancia,venta.nota,venta.metodoPago,JSON.stringify(venta.items),venta.clienteId,venta.clienteNombre,venta.clienteCedula,venta.clienteTelefono,venta.clienteDireccion,'','','','',venta.pagoRecibido!=null?venta.pagoRecibido:'',venta.cambio!=null?venta.cambio:'',venta.pagoEf!=null?venta.pagoEf:'',venta.pagoTr!=null?venta.pagoTr:'']);
 
   guardarLocal();
   mostrarToast(`Venta registrada · ${metodoPago==='transferencia'?'🏦':metodoPago==='mixto'?'🔀':'💵'} ${fmt(total)}`);
@@ -3610,8 +4157,8 @@ function renderHistorial() {
   }
 
   const totalDia=ventas.reduce((a,v)=>a+v.total,0);
-  const efectivo=ventas.filter(v=>v.metodoPago!=='transferencia').reduce((a,v)=>a+v.total,0);
-  const transferencia=ventas.filter(v=>v.metodoPago==='transferencia').reduce((a,v)=>a+v.total,0);
+  const efectivo=ventas.reduce((a,v)=>a+partesVenta(v).ef,0);
+  const transferencia=ventas.reduce((a,v)=>a+partesVenta(v).tr,0);
 
   summary.innerHTML=`<div id="dash-metrics" style="margin-bottom:1rem">
     <div class="metric rosa" style="display:inline-block;margin-right:12px;margin-bottom:8px;min-width:160px"><div class="mlabel">Total vendido</div><div class="mvalue">${fmt(totalDia)}</div></div>
@@ -3624,7 +4171,7 @@ function renderHistorial() {
       <td>${v.hora}</td>
       <td style="font-size:13px">${(v.items||[]).map(i=>esc(i.nombre)+' x'+i.cantidad).join('<br>')}</td>
       <td style="font-size:13px;color:var(--texto2)">${v.nota||'-'}</td>
-      <td><span class="badge ${v.metodoPago==='transferencia'?'rosa':'verde'}">${v.metodoPago==='transferencia'?'🏦 Transferencia':'💵 Efectivo'}</span></td>
+      <td>${badgeMetodo(v)}</td>
       <td style="font-weight:500">${fmt(v.total)}</td>
       <td style="color:var(--dorado-oscuro);font-weight:500">${fmt(v.ganancia)}</td>
       <td>${v.alegraNumero ? `<span class="badge rosa">${esc(v.alegraNumero)}</span>` : '-'}</td>
@@ -3670,6 +4217,13 @@ async function eliminarVenta(id) {
 // =============================================
 // REPORTES — PUNTO 2
 // =============================================
+let reporteDiaEsp = '';   // 'AAAA-MM-DD' cuando se busca un día específico
+let reporteMesEsp = '';   // 'AAAA-MM' cuando se busca un mes específico
+let reporteSemEsp = '';   // 'AAAA-MM-DD' (cualquier día de la semana que se busca)
+const MESES_LARGO = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+const MESES_CORTO = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+const DIAS_CORTO = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
+
 function getRangoPeriodo(periodo) {
   const hoy = new Date();
   let desde, hasta;
@@ -3686,12 +4240,149 @@ function getRangoPeriodo(periodo) {
   } else if (periodo === 'mes') {
     desde = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
     hasta = new Date(hoy); hasta.setHours(23,59,59,999);
+  } else if (periodo === 'semana-esp') {
+    const [y, m, d] = (reporteSemEsp || '').split('-').map(Number);
+    const base = y ? new Date(y, m - 1, d) : new Date(hoy);
+    const dow = base.getDay();
+    desde = new Date(base); desde.setDate(base.getDate() + (dow === 0 ? -6 : 1 - dow)); desde.setHours(0,0,0,0);
+    hasta = new Date(desde); hasta.setDate(desde.getDate() + 6); hasta.setHours(23,59,59,999);
+  } else if (periodo === 'dia-esp') {
+    const [y, m, d] = (reporteDiaEsp || '').split('-').map(Number);
+    const base = y ? new Date(y, m - 1, d) : new Date(hoy);
+    desde = new Date(base); desde.setHours(0,0,0,0);
+    hasta = new Date(base); hasta.setHours(23,59,59,999);
+  } else if (periodo === 'mes-esp') {
+    const [y, m] = (reporteMesEsp || '').split('-').map(Number);
+    const base = y ? new Date(y, m - 1, 1) : new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+    desde = base;
+    hasta = new Date(base.getFullYear(), base.getMonth() + 1, 0, 23,59,59,999);
   } else {
     desde = new Date(hoy.getFullYear(), 0, 1);
     hasta = new Date(hoy); hasta.setHours(23,59,59,999);
   }
 
   return { desde, hasta };
+}
+
+function kpiHTML(cls, icono, label, valor, sub) {
+  return `<div class="metric ${cls}"><div class="mtop"><span class="micon ${cls}"><i class="ti ${icono}"></i></span><span class="mlabel">${label}</span></div><div class="mvalue">${valor}</div>${sub ? `<div class="msub">${sub}</div>` : ''}</div>`;
+}
+
+// ---------- Productos más vendidos ----------
+const TOP_COLORES = ['var(--rosa)','var(--dorado)','var(--malva)','var(--rosa-medio)','var(--texto2)'];
+const TOP_OTROS = 'var(--blush)';
+let topModo = 'unid';
+const topCtx = {};
+
+function calcularTop(ventas, modo) {
+  const mapa = {};
+  ventas.forEach(v => (v.items || []).forEach(i => {
+    const k = String(i.nombre || '').trim();
+    if (!k || /^Liquidaci[oó]n\s*[—-]/i.test(k)) return;
+    if (!mapa[k]) mapa[k] = { nombre: k, unid: 0, monto: 0 };
+    mapa[k].unid += Number(i.cantidad) || 0;
+    mapa[k].monto += Number(i.total) || 0;
+  }));
+  const lista = Object.values(mapa).map(p => Object.assign(p, { valor: modo === 'monto' ? p.monto : p.unid }))
+    .filter(p => p.valor > 0).sort((a, b) => b.valor - a.valor);
+  const total = lista.reduce((a, p) => a + p.valor, 0);
+  const totalUnid = lista.reduce((a, p) => a + p.unid, 0);
+  const top = lista.slice(0, 5);
+  const resto = lista.slice(5);
+  if (resto.length) top.push({ nombre: 'Otros productos (' + resto.length + ')', unid: resto.reduce((a, p) => a + p.unid, 0), monto: resto.reduce((a, p) => a + p.monto, 0), valor: resto.reduce((a, p) => a + p.valor, 0), otros: true });
+  top.forEach((p, i) => { p.pct = total ? p.valor / total * 100 : 0; p.color = p.otros ? TOP_OTROS : TOP_COLORES[i]; });
+  return { lista: top, total, totalUnid, hay: lista.length > 0 };
+}
+
+function pctTxt(n) { return (Math.round(n * 10) / 10).toLocaleString('es-CO', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' %'; }
+
+function topDonaSVG(lista, centro, sub, size) {
+  const C = 2 * Math.PI * 70;
+  let acum = 0;
+  const arcos = lista.map(p => {
+    const len = C * p.pct / 100;
+    const s = `<circle cx="100" cy="100" r="70" style="stroke:${p.color}" stroke-dasharray="${len.toFixed(2)} ${(C - len).toFixed(2)}" stroke-dashoffset="${(-acum).toFixed(2)}"></circle>`;
+    acum += len;
+    return s;
+  }).join('');
+  return `<svg width="${size}" height="${size}" viewBox="0 0 200 200" role="img" aria-label="Reparto de productos más vendidos">
+    <g transform="rotate(-90 100 100)" fill="none" stroke-width="30">${arcos}</g>
+    <text x="100" y="${sub ? 98 : 107}" text-anchor="middle" class="top-dona-n">${esc(centro)}</text>
+    ${sub ? `<text x="100" y="118" text-anchor="middle" class="top-dona-s">${esc(sub)}</text>` : ''}
+  </svg>`;
+}
+
+function renderTop(contId, ventas, mini) {
+  const cont = document.getElementById(contId);
+  if (!cont) return;
+  topCtx[contId] = { ventas, mini };
+  const r = calcularTop(ventas, mini ? 'unid' : topModo);
+  if (!r.hay) {
+    cont.innerHTML = `<p class="rep-nota">Sin ventas en este periodo.</p>`;
+    return;
+  }
+  const esMonto = !mini && topModo === 'monto';
+  const centro = esMonto ? fmt(r.total) : String(r.total);
+  const sub = esMonto ? 'vendido' : 'unidades vendidas';
+  const filas = (mini ? r.lista.filter(p => !p.otros).slice(0, 3) : r.lista).map(p => `
+    <div class="top-fila">
+      <span class="top-punto" style="background:${p.color}"></span>
+      <span class="top-nombre">${esc(p.nombre)}</span>
+      <span class="top-cant">${esMonto ? fmt(p.monto) : p.unid}</span>
+      <span class="top-barra"><span style="width:${Math.max(2, p.pct / r.lista[0].pct * 100).toFixed(1)}%;background:${p.color}"></span></span>
+      <strong class="top-pct">${pctTxt(p.pct)}</strong>
+    </div>`).join('');
+  if (mini) {
+    cont.innerHTML = `<div class="top-mini">
+      <div class="top-mini-dona">${topDonaSVG(r.lista, centro, sub, 150)}</div>
+      <div class="top-mini-lista">${filas}</div></div>`;
+    return;
+  }
+  const g = r.lista[0];
+  cont.innerHTML = `
+    <div class="top-toggle">
+      <button type="button" class="top-modo${topModo === 'unid' ? ' active' : ''}" data-modo="unid">Por unidades</button>
+      <button type="button" class="top-modo${topModo === 'monto' ? ' active' : ''}" data-modo="monto">Por ventas $</button>
+    </div>
+    <div class="top-grid">
+      <div class="top-dona">${topDonaSVG(r.lista, centro, sub, 240)}</div>
+      <div class="top-hero">
+        <div class="top-hero-et">🏆 El más vendido</div>
+        <div class="top-hero-n">${esc(g.nombre)}</div>
+        <div class="top-hero-stats">
+          <div><b>${g.unid}</b>unidades</div>
+          <div><b>${pctTxt(g.pct)}</b>del total</div>
+          <div><b class="oro">${fmt(g.monto)}</b>en ventas</div>
+        </div>
+      </div>
+    </div>
+    <div class="top-cab"><span></span><span>Producto</span><span>${esMonto ? 'Ventas' : 'Unidades'}</span><span></span><span>%</span></div>
+    ${filas}`;
+  cont.querySelectorAll('.top-modo').forEach(b => b.addEventListener('click', () => {
+    topModo = b.dataset.modo;
+    renderTop(contId, topCtx[contId].ventas, false);
+  }));
+}
+
+// Para "Más vendidos": los abonos de deudas/créditos/anticipos no cuentan como ventas de productos
+// (cada abono copia la lista completa y se contaría varias veces). En su lugar se cuentan los
+// productos una sola vez, el día en que se fiaron.
+function ventasParaTop(ventas, enRango) {
+  const normales = ventas.filter(v => !/^(Abono deuda|Abono cr[eé]dito|Anticipo)/i.test(v.nota || ''));
+  const virtuales = [];
+  [].concat(DB.deudores || [], DB.creditos || [], (DB.anticipos || []).filter(x => x.pagada)).forEach(d => {
+    if (!enRango(d.fecha)) return;
+    const items = (d.productos || []).map(p => ({ nombre: p.productoNombre || p.nombre, cantidad: p.cantidad, total: (Number(p.precioUnit) || 0) * (Number(p.cantidad) || 0) }));
+    if (items.length) virtuales.push({ items });
+  });
+  return normales.concat(virtuales);
+}
+
+function renderTopResumen() {
+  const hoy = parseFechaCO(fechaCO());
+  const ini = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+  const enMes = f => { const d = parseFechaCO(f); return d >= ini && d <= hoy; };
+  renderTop('dash-top', ventasParaTop(DB.ventas.filter(v => enMes(v.fecha)), enMes), true);
 }
 
 function renderReportes(periodo) {
@@ -3703,103 +4394,239 @@ function renderReportes(periodo) {
   });
 
   const { desde, hasta } = getRangoPeriodo(periodo);
-  const ventas = DB.ventas.filter(v => {
-    const d = parseFechaCO(v.fecha);
-    return d >= desde && d <= hasta;
-  });
+  const enRango = f => { const d = parseFechaCO(f); return d >= desde && d <= hasta; };
+  const ventas = DB.ventas.filter(v => enRango(v.fecha));
+  const gastos = DB.gastos.filter(g => enRango(g.fecha));
+  const costos = DB.costos.filter(c => enRango(c.fecha));
+  const r = resumenMetodos(ventas, gastos, costos);
+  const pagosProv = DB.proveedores.flatMap(p => p.abonos || []).filter(a => enRango(a.fecha)).reduce((s, a) => s + (Number(a.monto) || 0), 0);
 
-  const totalVendido   = ventas.reduce((a,v)=>a+v.total,0);
-  const totalGanancia  = ventas.reduce((a,v)=>a+v.ganancia,0);
-  const totalEfectivo  = ventas.filter(v=>v.metodoPago!=='transferencia').reduce((a,v)=>a+v.total,0);
-  const totalTransf    = ventas.filter(v=>v.metodoPago==='transferencia').reduce((a,v)=>a+v.total,0);
-  const ganEfectivo    = ventas.filter(v=>v.metodoPago!=='transferencia').reduce((a,v)=>a+v.ganancia,0);
-  const ganTransf      = ventas.filter(v=>v.metodoPago==='transferencia').reduce((a,v)=>a+v.ganancia,0);
+  const labels = {
+    dia:'hoy', semana:'esta semana', mes:'este mes', año:'este año',
+    'dia-esp': 'el ' + fechaCO(desde),
+    'semana-esp': 'la semana del ' + fechaCO(desde) + ' al ' + fechaCO(hasta),
+    'mes-esp': 'de ' + MESES_LARGO[desde.getMonth()] + ' ' + desde.getFullYear()
+  };
 
-  const labels = { dia:'hoy', semana:'esta semana', mes:'este mes', año:'este año' };
+  const rango = document.getElementById('reporte-rango');
+  if (rango) {
+    const mismo = fechaCO(desde) === fechaCO(hasta);
+    const conFechas = periodo !== 'dia-esp' && periodo !== 'semana-esp';
+    rango.textContent = 'Mostrando ' + labels[periodo] + (conFechas ? ' · ' + fechaCO(desde) + (mismo ? '' : ' – ' + fechaCO(hasta)) : '');
+  }
 
-  // Métricas principales — solo ventas, sin mezclar gastos
-  document.getElementById('reporte-metrics').innerHTML = `
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:1.5rem">
-      <div class="metric rosa"><div class="mlabel">Total vendido ${labels[periodo]}</div><div class="mvalue">${fmt(totalVendido)}</div></div>
-      <div class="metric dorado"><div class="mlabel">Ganancia ${labels[periodo]}</div><div class="mvalue">${fmt(totalGanancia)}</div></div>
-      <div class="metric"><div class="mlabel">Transacciones</div><div class="mvalue">${ventas.length}</div></div>
-    </div>`;
+  const promedio = ventas.length ? r.vendido / ventas.length : 0;
+
+  // Métricas principales
+  document.getElementById('reporte-metrics').innerHTML =
+    kpiHTML('rosa', 'ti-trending-up', 'Total vendido', fmt(r.vendido)) +
+    kpiHTML('dorado', 'ti-coin', 'Ganancia', fmt(r.ganancia)) +
+    kpiHTML('danger', 'ti-receipt-2', 'Gastos', fmt(r.gasto)) +
+    kpiHTML('danger', 'ti-box-seam', 'Costos', fmt(r.costo)) +
+    kpiHTML('danger', 'ti-building-warehouse', 'Pagos a proveedores', fmt(pagosProv)) +
+    kpiHTML(r.neto < 0 ? 'danger' : 'neto', 'ti-wallet', 'Ganancia neta', fmt(r.neto), 'Ganancia − gastos − costos') +
+    kpiHTML('teal', 'ti-shopping-bag', 'Transacciones', String(ventas.length), ventas.length ? 'Promedio ' + fmt(promedio) : '');
+
+  renderGraficaReporte(periodo, ventas, desde, labels[periodo]);
+
+  // Dona efectivo vs transferencia
+  const dona = document.getElementById('reporte-dona');
+  if (dona) {
+    if (r.vendido > 0) {
+      const C = 2 * Math.PI * 64, pEf = r.vEf / r.vendido;
+      dona.innerHTML = `
+        <div class="dona-wrap"><svg width="170" height="170" viewBox="0 0 170 170" role="img" aria-label="${Math.round(pEf*100)} % efectivo, ${100-Math.round(pEf*100)} % transferencia">
+          <circle cx="85" cy="85" r="64" fill="none" stroke="var(--dorado)" stroke-width="22"/>
+          <circle cx="85" cy="85" r="64" fill="none" stroke="var(--rosa)" stroke-width="22" stroke-dasharray="${(C*pEf).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 85 85)"/>
+          <text x="85" y="87" text-anchor="middle" class="dona-pct">${Math.round(pEf*100)} %</text>
+          <text x="85" y="107" text-anchor="middle" class="dona-sub">en efectivo</text>
+        </svg></div>
+        <div class="dona-leyenda">
+          <div><i class="rg-dot" style="background:var(--rosa)"></i><span>Efectivo</span><strong>${fmt(r.vEf)}</strong></div>
+          <div><i class="rg-dot" style="background:var(--dorado)"></i><span>Transferencia</span><strong>${fmt(r.vTr)}</strong></div>
+        </div>`;
+    } else {
+      dona.innerHTML = `<div class="estado-vacio" style="padding:1.5rem"><i class="ti ti-chart-donut"></i><p>Sin ventas en este periodo.</p></div>`;
+    }
+  }
 
   // Desglose por método de pago — ventas
   document.getElementById('reporte-pago').innerHTML = `
     <div class="reporte-pago-card">
       <span class="rp-icon">💵</span>
       <div class="rp-label">Ventas en Efectivo</div>
-      <div class="rp-value">${fmt(totalEfectivo)}</div>
-      <div class="rp-sub">Ganancia: ${fmt(ganEfectivo)}</div>
+      <div class="rp-value">${fmt(r.vEf)}</div>
+      <div class="rp-sub">Ganancia: ${fmt(r.gaEf)}</div>
     </div>
     <div class="reporte-pago-card">
       <span class="rp-icon">🏦</span>
       <div class="rp-label">Ventas por Transferencia</div>
-      <div class="rp-value">${fmt(totalTransf)}</div>
-      <div class="rp-sub">Ganancia: ${fmt(ganTransf)}</div>
+      <div class="rp-value">${fmt(r.vTr)}</div>
+      <div class="rp-sub">Ganancia: ${fmt(r.gaTr)}</div>
     </div>
-    <div class="reporte-pago-card" style="border:0.5px solid var(--rosa-medio)">
+    <div class="reporte-pago-card destacada">
       <span class="rp-icon">📊</span>
       <div class="rp-label">Total combinado</div>
-      <div class="rp-value">${fmt(totalVendido)}</div>
-      <div class="rp-sub">Ganancia total: ${fmt(totalGanancia)}</div>
+      <div class="rp-value">${fmt(r.vendido)}</div>
+      <div class="rp-sub">Ganancia total: ${fmt(r.ganancia)}</div>
     </div>`;
 
-  // Resumen neto del mes: siempre el mes actual, independiente del periodo elegido arriba
-  renderResumenNetoMes();
+  // Ventas con ganancia negativa del periodo (notas crédito, abonos con costo mayor al monto, ventas bajo costo)
+  const contNeg = document.getElementById('reporte-neg');
+  if (contNeg) {
+    const negativas = ventas.filter(v => (v.ganancia || 0) < 0).sort((a, b) => a.ganancia - b.ganancia);
+    contNeg.innerHTML = negativas.length ? `
+      <details class="rep-neg" open>
+        <summary>⚠️ ${negativas.length} movimiento(s) con ganancia negativa en este periodo — suman ${fmt(negativas.reduce((s, v) => s + v.ganancia, 0))}</summary>
+        <div class="tabla-wrap"><table>
+          <thead><tr><th>Fecha</th><th>Detalle</th><th>Pago</th><th>Total</th><th>Ganancia</th></tr></thead>
+          <tbody>${negativas.slice(0, 40).map(v => `<tr>
+            <td>${esc(v.fecha)}<br><span style="font-size:11px;color:var(--texto2)">${esc(v.hora)}</span></td>
+            <td style="font-size:13px">${esc(v.nota) || (v.items || []).map(i => esc(i.nombre) + ' x' + i.cantidad).join(', ')}</td>
+            <td>${badgeMetodo(v)}</td>
+            <td>${fmt(v.total)}</td>
+            <td style="color:#A32D2D;font-weight:600">${fmt(v.ganancia)}</td>
+          </tr>`).join('')}</tbody></table></div>
+      </details>` : '';
+  }
+
+  // Ganancia neta del periodo: una "cascada" por método de pago
+  const cascada = (cls, icono, titulo, gan, gas, cos, neto, etiqueta) => `
+    <div class="neto-card ${cls}">
+      <div class="neto-cab"><span class="neto-ico">${icono}</span><span>${titulo}</span></div>
+      <div class="neto-fila"><span>Ganancia</span><strong class="g">+ ${fmt(gan)}</strong></div>
+      <div class="neto-fila"><span>Gastos</span><strong>− ${fmt(gas)}</strong></div>
+      <div class="neto-fila"><span>Costos</span><strong class="${cos > 0 ? 'c' : ''}">− ${fmt(cos)}</strong></div>
+      <div class="neto-res"><div class="neto-et">${etiqueta}</div><div class="neto-val${neto < 0 ? ' neg' : ''}">${fmt(neto)}</div></div>
+    </div>`;
+  document.getElementById('reporte-neto').innerHTML = `<div class="neto-cards">` +
+    cascada('', '💵', 'En efectivo', r.gaEf, r.gsEf, r.csEf, r.netoEf, 'Te queda') +
+    cascada('', '🏦', 'Por transferencia', r.gaTr, r.gsTr, r.csTr, r.netoTr, 'Te queda') +
+    cascada('total', '📊', 'Total del periodo', r.ganancia, r.gasto, r.costo, r.neto, 'Ganancia neta total') +
+    `</div>`;
+
+  // Costos del periodo por categoría
+  const contCostos = document.getElementById('reporte-costos');
+  if (contCostos) {
+    const porCat = {};
+    costos.forEach(c => { porCat[c.categoria] = (porCat[c.categoria] || 0) + c.monto; });
+    const cats = Object.keys(porCat).sort((a, b) => porCat[b] - porCat[a]);
+    contCostos.innerHTML = cats.length
+      ? cats.map(k => `<div class="reporte-pago-card"><div class="rp-label">${esc(k)}</div><div class="rp-value">${fmt(porCat[k])}</div></div>`).join('')
+        + `<div class="reporte-pago-card destacada"><div class="rp-label">Total costos</div><div class="rp-value">${fmt(r.costo)}</div></div>`
+      : `<p style="font-size:13px;color:var(--texto2)">Sin costos registrados en este periodo.</p>`;
+  }
+
+  renderTop('reporte-top', ventasParaTop(ventas, enRango), false);
+
 }
 
-// Resumen neto del mes actual: ganancia de ventas menos gastos, y ventas menos pagos a proveedores.
-// Siempre calculado para el mes en curso (se "reinicia" solo porque nunca acumula meses anteriores).
-function renderResumenNetoMes() {
-  const hoy = new Date();
-  const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
-  const finMes = new Date(hoy.getFullYear(), hoy.getMonth()+1, 0, 23,59,59,999);
+// ---------- Gráfica de reportes ----------
+function horaDeVenta(v) {
+  const m = String(v.hora || '').match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*([apAP])?/);
+  if (!m) return null;
+  let h = parseInt(m[1]);
+  if (m[3]) {
+    const pm = m[3].toLowerCase() === 'p';
+    if (pm && h < 12) h += 12;
+    if (!pm && h === 12) h = 0;
+  }
+  return (h >= 0 && h <= 23) ? h : null;
+}
 
-  const ventasMes = DB.ventas.filter(v => { const d = parseFechaCO(v.fecha); return d>=inicioMes && d<=finMes; });
-  const gastosMes = DB.gastos.filter(g => { const d = parseFechaCO(g.fecha); return d>=inicioMes && d<=finMes; });
+function reporteSerie(periodo, ventas, desde) {
+  let cats = [], titulo = '';
+  if (periodo === 'dia' || periodo === 'dia-esp') {
+    titulo = 'Ventas por hora';
+    let min = 6, max = 21;
+    const horas = ventas.map(horaDeVenta);
+    horas.forEach(h => { if (h != null) { min = Math.min(min, h); max = Math.max(max, h); } });
+    for (let h = min; h <= max; h++) cats.push({ label: h + 'h', tip: `${h}:00 a ${h}:59`, vendido: 0, ganancia: 0 });
+    ventas.forEach((v, i) => {
+      const h = horas[i]; if (h == null) return;
+      cats[h - min].vendido += v.total; cats[h - min].ganancia += v.ganancia;
+    });
+  } else if (periodo === 'semana' || periodo === 'semana-esp') {
+    titulo = 'Ventas por día de la semana';
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(desde); d.setDate(desde.getDate() + i);
+      cats.push({ label: DIAS_CORTO[i], tip: DIAS_CORTO[i] + ' ' + fechaCO(d), vendido: 0, ganancia: 0 });
+    }
+    ventas.forEach(v => {
+      const i = Math.round((parseFechaCO(v.fecha) - desde) / 86400000);
+      if (cats[i]) { cats[i].vendido += v.total; cats[i].ganancia += v.ganancia; }
+    });
+  } else if (periodo === 'mes' || periodo === 'mes-esp') {
+    titulo = 'Ventas por día del mes';
+    const n = new Date(desde.getFullYear(), desde.getMonth() + 1, 0).getDate();
+    for (let i = 1; i <= n; i++) cats.push({ label: String(i), tip: fechaCO(new Date(desde.getFullYear(), desde.getMonth(), i)), vendido: 0, ganancia: 0 });
+    ventas.forEach(v => {
+      const i = parseFechaCO(v.fecha).getDate() - 1;
+      if (cats[i]) { cats[i].vendido += v.total; cats[i].ganancia += v.ganancia; }
+    });
+  } else {
+    titulo = 'Ventas por mes';
+    for (let i = 0; i < 12; i++) cats.push({ label: MESES_CORTO[i], tip: MESES_LARGO[i] + ' ' + desde.getFullYear(), vendido: 0, ganancia: 0 });
+    ventas.forEach(v => {
+      const i = parseFechaCO(v.fecha).getMonth();
+      if (cats[i]) { cats[i].vendido += v.total; cats[i].ganancia += v.ganancia; }
+    });
+  }
+  return { titulo, cats };
+}
 
-  const totalVendidoMes = ventasMes.reduce((a,v)=>a+v.total,0);
-  const gananciaMes     = ventasMes.reduce((a,v)=>a+v.ganancia,0);
-  const totalGastosMes  = gastosMes.reduce((a,g)=>a+g.monto,0);
-  const gananciaNetaMes = gananciaMes - totalGastosMes;
+function fmtCorto(n) {
+  if (n >= 1000000) return '$' + (n / 1000000).toFixed(1).replace('.0', '').replace('.', ',') + ' M';
+  if (n >= 1000) return '$' + Math.round(n / 1000) + ' mil';
+  return '$' + Math.round(n);
+}
 
-  const ganEfectivoMes    = ventasMes.filter(v=>v.metodoPago!=='transferencia').reduce((a,v)=>a+v.ganancia,0);
-  const ganTransfMes      = ventasMes.filter(v=>v.metodoPago==='transferencia').reduce((a,v)=>a+v.ganancia,0);
-  const gastosEfectivoMes = gastosMes.filter(g=>g.metodoPago!=='transferencia').reduce((a,g)=>a+g.monto,0);
-  const gastosTransfMes   = gastosMes.filter(g=>g.metodoPago==='transferencia').reduce((a,g)=>a+g.monto,0);
-  const netoEfectivo      = ganEfectivoMes - gastosEfectivoMes;
-  const netoTransferencia = ganTransfMes - gastosTransfMes;
+function pasoBonito(x) {
+  const p = Math.pow(10, Math.floor(Math.log10(x)));
+  const r = x / p;
+  return (r <= 1 ? 1 : r <= 2 ? 2 : r <= 5 ? 5 : 10) * p;
+}
 
-  const pagosProveedoresMes = DB.proveedores.flatMap(p => p.abonos||[])
-    .filter(a => { const d = parseFechaCO(a.fecha); return d>=inicioMes && d<=finMes; })
-    .reduce((s,a)=>s+a.monto,0);
-  const ventasNetasMes = totalVendidoMes - pagosProveedoresMes;
+function renderGraficaReporte(periodo, ventas, desde, etiqueta) {
+  const cont = document.getElementById('reporte-grafica');
+  const tit = document.getElementById('reporte-grafica-titulo');
+  if (!cont) return;
+  const { titulo, cats } = reporteSerie(periodo, ventas, desde);
+  tit.textContent = `${titulo} — ${etiqueta}`;
 
-  document.getElementById('resumen-neto-metrics').innerHTML = `
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px">
-      <div class="metric dorado"><div class="mlabel">Ganancia del mes</div><div class="mvalue">${fmt(gananciaMes)}</div></div>
-      <div class="metric danger"><div class="mlabel">Gastos del mes</div><div class="mvalue">${fmt(totalGastosMes)}</div></div>
-      <div class="metric dorado"><div class="mlabel">Ganancia neta del mes</div><div class="mvalue">${fmt(gananciaNetaMes)}</div></div>
-      <div class="metric"><div class="mlabel">Ventas del mes</div><div class="mvalue">${fmt(totalVendidoMes)}</div></div>
-      <div class="metric danger"><div class="mlabel">Pagos a proveedores (mes)</div><div class="mvalue">${fmt(pagosProveedoresMes)}</div></div>
-      <div class="metric"><div class="mlabel">Ventas netas del mes</div><div class="mvalue">${fmt(ventasNetasMes)}</div></div>
-    </div>`;
+  if (!ventas.length) {
+    cont.innerHTML = `<div class="estado-vacio" style="padding:1.5rem"><i class="ti ti-chart-bar"></i><p>Sin ventas en este periodo.</p></div>`;
+    return;
+  }
 
-  document.getElementById('resumen-neto-pago').innerHTML = `
-    <div class="reporte-pago-card">
-      <span class="rp-icon">💵</span>
-      <div class="rp-label">Neto en Efectivo</div>
-      <div class="rp-value">${fmt(netoEfectivo)}</div>
-      <div class="rp-sub">Ganancia ${fmt(ganEfectivoMes)} − Gastos ${fmt(gastosEfectivoMes)}</div>
-    </div>
-    <div class="reporte-pago-card">
-      <span class="rp-icon">🏦</span>
-      <div class="rp-label">Neto en Transferencia</div>
-      <div class="rp-value">${fmt(netoTransferencia)}</div>
-      <div class="rp-sub">Ganancia ${fmt(ganTransfMes)} − Gastos ${fmt(gastosTransfMes)}</div>
-    </div>`;
+  const n = cats.length;
+  const W = Math.max(cont.clientWidth || 640, n * 30 + 70, 560), H = 300, ml = 62, mr = 12, mt = 18, mb = 34;
+  const iw = W - ml - mr, ih = H - mt - mb;
+  const maxVal = Math.max(1, ...cats.map(x => Math.max(x.vendido, x.ganancia, 0)));
+  const paso = pasoBonito(maxVal / 4);
+  const tope = Math.ceil(maxVal / paso) * paso;
+  const y = v => mt + ih - (Math.max(0, v) / tope) * ih;
+  const gw = iw / n, bw = Math.min(18, gw * 0.38);
+
+  let svg = '';
+  for (let t = 0; t <= tope + 0.001; t += paso) {
+    svg += `<line x1="${ml}" x2="${W - mr}" y1="${y(t)}" y2="${y(t)}" class="rg-grid"/>`;
+    svg += `<text x="${ml - 8}" y="${y(t) + 4}" text-anchor="end">${fmtCorto(t)}</text>`;
+  }
+  cats.forEach((x, i) => {
+    const cx = ml + gw * i + gw / 2;
+    const hv = (Math.max(0, x.vendido) / tope) * ih, hg = (Math.max(0, x.ganancia) / tope) * ih;
+    svg += `<g><title>${x.tip}\nVendido: ${fmt(x.vendido)}\nGanancia: ${fmt(x.ganancia)}</title>
+      <rect x="${cx - bw - 1}" y="${mt + ih - hv}" width="${bw}" height="${hv}" rx="3" class="rg-vendido"/>
+      <rect x="${cx + 1}" y="${mt + ih - hg}" width="${bw}" height="${hg}" rx="3" class="rg-ganancia"/>
+      <rect x="${cx - gw / 2}" y="${mt}" width="${gw}" height="${ih}" fill="transparent"/></g>`;
+    if (n <= 12 && x.vendido > 0) svg += `<text x="${cx - bw / 2 - 1}" y="${mt + ih - hv - 5}" text-anchor="middle" class="rg-valor">${fmtCorto(x.vendido)}</text>`;
+    svg += `<text x="${cx}" y="${H - 12}" text-anchor="middle">${x.label}</text>`;
+  });
+
+  cont.innerHTML = `
+    <div class="rg-leyenda"><span><i class="rg-dot rg-vendido"></i> Vendido</span><span><i class="rg-dot rg-ganancia"></i> Ganancia</span></div>
+    <div class="tabla-wrap"><svg class="rep-graf" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${titulo}">${svg}</svg></div>`;
 }
 
 // =============================================
@@ -3880,11 +4707,14 @@ document.addEventListener('DOMContentLoaded', () => {
   cargarLocal();
   if (DB.usuarios.length===0) DB.usuarios=[{user:'admin',pass:'lubin2812',rol:'admin'}];
   if (DB.config.trasladoContador === undefined) DB.config.trasladoContador = 0;
+  if (DB.config.codigoContador === undefined) DB.config.codigoContador = CODIGO_INICIAL;
+  if (!DB.equivalencias) DB.equivalencias = [];
   if (!DB.clientes) DB.clientes = [];
   if (!DB.deudores) DB.deudores = [];
   if (!DB.anticipos) DB.anticipos = [];
   if (!DB.proveedores) DB.proveedores = [];
   if (!DB.gastos) DB.gastos = [];
+  if (!DB.costos) DB.costos = [];
   if (!DB.traslados) DB.traslados = [];
 
   // Sesión persistente
@@ -4077,6 +4907,12 @@ document.addEventListener('DOMContentLoaded', () => {
     traslado = []; renderTraslado();
   });
   document.getElementById('btn-imprimir-traslado').addEventListener('click', imprimirTraslado);
+  // Opciones del traslado: modo prueba + las otras dos bodegas (no se puede trasladar a sí misma).
+  const selBodega = document.getElementById('traslado-bodega');
+  selBodega.innerHTML = '<option value="">Prueba / solo imprimir (no mueve stock)</option>' +
+    Object.keys(BODEGAS).filter(k => k !== BODEGA_ACTUAL).map(k => `<option value="${k}">${BODEGAS[k].nombre}</option>`).join('');
+  document.getElementById('traslado-origen').value = BODEGAS[BODEGA_ACTUAL].nombre;
+  document.getElementById('traslado-bodega').addEventListener('change', e => { const b = BODEGAS[e.target.value]; document.getElementById('traslado-destino').value = b ? b.nombre : 'MULTIREPUESTOS SOLOAGRO 2'; });
   document.getElementById('btn-ct-agregar').addEventListener('click', confirmarCantidadTraslado);
   document.getElementById('ct-cantidad').addEventListener('keydown', e => { if (e.key==='Enter') confirmarCantidadTraslado(); });
 
@@ -4168,6 +5004,24 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-guardar-gasto').addEventListener('click', guardarGasto);
   document.querySelectorAll('.gasto-cat-btn').forEach(b =>
     b.addEventListener('click', () => seleccionarCategoriaGasto(b.dataset.cat, b)));
+  document.querySelectorAll('input[name="gasto-metodo"]').forEach(r => r.addEventListener('change', gastoActualizarMixto));
+  document.getElementById('gasto-monto').addEventListener('input', () => {
+    if (document.querySelector('input[name="gasto-metodo"]:checked').value === 'mixto') gastoMixtoDesde('monto');
+  });
+  document.getElementById('gasto-mixto-efectivo').addEventListener('input', () => gastoMixtoDesde('ef'));
+  document.getElementById('gasto-mixto-transferencia').addEventListener('input', () => gastoMixtoDesde('tr'));
+
+  // Costos
+  document.getElementById('btn-abrir-modal-costo').addEventListener('click', abrirModalCosto);
+  document.getElementById('btn-guardar-costo').addEventListener('click', guardarCosto);
+  document.querySelectorAll('input[name="costo-metodo"]').forEach(r => r.addEventListener('change', costoActualizarMixto));
+  document.getElementById('costo-monto').addEventListener('input', () => {
+    if (document.querySelector('input[name="costo-metodo"]:checked').value === 'mixto') costoMixtoDesde('monto');
+  });
+  document.getElementById('costo-mixto-efectivo').addEventListener('input', () => costoMixtoDesde('ef'));
+  document.getElementById('costo-mixto-transferencia').addEventListener('input', () => costoMixtoDesde('tr'));
+  document.querySelectorAll('.costo-cat-btn').forEach(b =>
+    b.addEventListener('click', () => seleccionarCategoriaCosto(b.dataset.cat, b)));
 
   // Nota crédito
   document.getElementById('btn-confirmar-nota-credito').addEventListener('click', confirmarNotaCredito);
@@ -4176,8 +5030,24 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('hist-fecha').addEventListener('change', renderHistorial);
 
   // Reportes
-  document.querySelectorAll('.btn-reporte').forEach(b=>
-    b.addEventListener('click',()=> renderReportes(b.dataset.periodo)));
+  const limpiarEspecificos = () => {
+    reporteDiaEsp = ''; reporteSemEsp = ''; reporteMesEsp = '';
+    ['rep-dia','rep-sem','rep-mes'].forEach(id => { document.getElementById(id).value = ''; });
+  };
+  document.querySelectorAll('.btn-reporte').forEach(b =>
+    b.addEventListener('click', () => { limpiarEspecificos(); renderReportes(b.dataset.periodo); }));
+  document.getElementById('rep-dia').addEventListener('change', e => {
+    const v = e.target.value; limpiarEspecificos(); e.target.value = v; reporteDiaEsp = v;
+    renderReportes(v ? 'dia-esp' : 'semana');
+  });
+  document.getElementById('rep-sem').addEventListener('change', e => {
+    const v = e.target.value; limpiarEspecificos(); e.target.value = v; reporteSemEsp = v;
+    renderReportes(v ? 'semana-esp' : 'semana');
+  });
+  document.getElementById('rep-mes').addEventListener('change', e => {
+    const v = e.target.value; limpiarEspecificos(); e.target.value = v; reporteMesEsp = v;
+    renderReportes(v ? 'mes-esp' : 'semana');
+  });
 
   // Config
   document.getElementById('btn-agregar-usuario').addEventListener('click', agregarUsuario);
