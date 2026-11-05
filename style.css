@@ -328,6 +328,7 @@ input[type="text"],
 input[type="number"],
 input[type="password"],
 input[type="date"],
+textarea,
 select {
   padding: 10px 14px;
   border: 0.5px solid var(--borde);
@@ -340,7 +341,8 @@ select {
   width: 100%;
   margin-bottom: 10px;
 }
-input:focus, select:focus { border-color: var(--rosa-medio); background: var(--card); }
+textarea { resize: vertical; min-height: 80px; line-height: 1.4; }
+input:focus, select:focus, textarea:focus { border-color: var(--rosa-medio); background: var(--card); }
 
 #inv-search, #venta-search { border-radius: 20px; margin-bottom: 1rem; }
 
@@ -575,6 +577,7 @@ input:focus, select:focus { border-color: var(--rosa-medio); background: var(--c
   input[type="number"],
   input[type="password"],
   input[type="date"],
+  textarea,
   select {
     font-size: 16px;
   }
@@ -674,6 +677,37 @@ input:focus, select:focus { border-color: var(--rosa-medio); background: var(--c
 /* IMPRESIÓN DE TRASLADO Y BOUCHER */
 #traslado-print, #venta-print, #deudor-print, #proveedor-print, #cotizacion-print { display: none; }
 
+/* TRASLADO — formato tipo documento con marco */
+#traslado-print.activo { padding: 0; }
+.tpd-pagina { border: 1px solid #000; min-height: 250mm; display: flex; flex-direction: column; padding: 10px 12px; font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #000; }
+.tpd-cabecera { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 12px; }
+.tpd-empresa { flex: 1; text-align: center; line-height: 1.35; }
+.tpd-empresa strong { display: block; font-size: 14px; }
+.tpd-empresa span { display: block; font-size: 12px; }
+.tpd-numero { width: 150px; border: 1px solid #000; border-radius: 4px; padding: 10px; text-align: center; }
+.tpd-numero span { display: block; font-size: 10px; margin-bottom: 4px; }
+.tpd-numero strong { font-size: 13px; }
+.tpd-cajas { display: flex; gap: 10px; margin-bottom: 12px; }
+#traslado-print .tpd-caja { flex: 1; width: auto; border: 1px solid #000; border-collapse: collapse; font-size: 11px; }
+#traslado-print .tpd-caja th { width: 32%; background: #e6e6e6; text-align: left; border: none; padding: 2px 6px; font-weight: 600; }
+#traslado-print .tpd-caja td { border: none; padding: 2px 6px; background: #fff; }
+#traslado-print .tpd-tabla { width: 100%; border-collapse: collapse; font-size: 11px; }
+#traslado-print .tpd-tabla th { background: #e6e6e6; border: 1px solid #000; padding: 3px 6px; text-align: center; font-weight: 600; }
+#traslado-print .tpd-tabla td { border: none; border-bottom: 1px solid #ccc; padding: 3px 6px; }
+#traslado-print .tpd-tabla tfoot td { border-top: 1px solid #000; border-bottom: none; }
+#traslado-print .tpd-der { text-align: right; }
+.tpd-obs { margin-top: 8px; font-size: 11px; }
+.tpd-obs-texto { white-space: pre-wrap; margin-top: 2px; }
+.tpd-pie { margin-top: auto; }
+.tpd-firmas { display: flex; border: 1px solid #000; height: 110px; }
+.tpd-firma { flex: 1; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 8px; font-weight: 600; font-size: 11px; }
+.tpd-firma + .tpd-firma { border-left: 1px solid #000; }
+.tpd-pag { text-align: right; font-weight: 600; margin-top: 4px; font-size: 10px; }
+#traslado-print .tpd-caja th, #traslado-print .tpd-tabla th { text-transform: none; color: #000; letter-spacing: 0; font-size: 11px; }
+.tpd-pagina { background: #fff; }
+@media print { body { background: #fff !important; } }
+@page { margin: 8mm; }
+
 #tp-firmas {
   display: flex;
   justify-content: space-between;
@@ -724,7 +758,7 @@ input:focus, select:focus { border-color: var(--rosa-medio); background: var(--c
 /* =====================================================================
    ESTILO "PANEL CLARO" — fondo crema, tarjetas blancas, acentos verde y dorado
    ===================================================================== */
-:root { --sombra: 0 2px 12px rgba(23,74,50,0.06); --radio: 14px; }
+:root { --sombra: 0 2px 12px rgba(31,122,77,0.06); --radio: 14px; }
 body { font-feature-settings: "tnum"; -webkit-font-smoothing: antialiased; }
 
 /* Barra lateral clara */
@@ -736,7 +770,7 @@ body { font-feature-settings: "tnum"; -webkit-font-smoothing: antialiased; }
 .nav-tab { color: var(--texto2); border-left: none; border-radius: 10px; font-size: 14px; }
 .nav-tab i { color: var(--rosa-medio); }
 .nav-tab:hover { color: var(--rosa-oscuro); background: var(--blush-claro); }
-.nav-tab.active { color: #fff; background: var(--rosa); font-weight: 600; box-shadow: 0 2px 8px rgba(23,74,50,0.22); }
+.nav-tab.active { color: #fff; background: var(--rosa); font-weight: 600; box-shadow: 0 2px 8px rgba(31,122,77,0.22); }
 .nav-tab.active i { color: var(--dorado); }
 
 /* Barra superior clara */
@@ -764,7 +798,7 @@ body { font-feature-settings: "tnum"; -webkit-font-smoothing: antialiased; }
 .metric.neto .mvalue { color: #1B6B43; }
 .metric.teal .mvalue { color: var(--texto); }
 .metric .msub { margin-top: 8px; font-size: 12px; color: var(--texto2); font-weight: 500; }
-.metric-clickeable:hover { box-shadow: 0 6px 18px rgba(23,74,50,0.12); }
+.metric-clickeable:hover { box-shadow: 0 6px 18px rgba(31,122,77,0.12); }
 
 /* Tablas */
 th { background: var(--fondo); border-bottom: 1px solid var(--borde); font-weight: 600; }
@@ -772,7 +806,7 @@ td { border-bottom: 1px solid var(--borde); }
 tr:hover td { background: var(--fondo); }
 
 /* Botones */
-.btn-primary { border-radius: 999px; padding: 9px 20px; font-weight: 600; box-shadow: 0 2px 8px rgba(23,74,50,0.2); }
+.btn-primary { border-radius: 999px; padding: 9px 20px; font-weight: 600; box-shadow: 0 2px 8px rgba(31,122,77,0.2); }
 .btn-secundario { border: 1px solid var(--borde); border-radius: 999px; }
 .btn-peligro { border: 1px solid #F7C1C1; border-radius: 999px; }
 .btn-dorado { border-radius: 999px; }
@@ -780,7 +814,7 @@ tr:hover td { background: var(--fondo); }
 /* Campos */
 input[type="text"], input[type="number"], input[type="password"], input[type="email"],
 input[type="date"], input[type="month"], select, textarea { border: 1px solid var(--borde); background: var(--fondo); border-radius: 10px; }
-input:focus, select:focus, textarea:focus { border-color: var(--rosa); background: var(--card); box-shadow: 0 0 0 3px rgba(23,74,50,0.08); }
+input:focus, select:focus, textarea:focus { border-color: var(--rosa); background: var(--card); box-shadow: 0 0 0 3px rgba(31,122,77,0.08); }
 #metodo-pago-box, .carrito-item { border: 1px solid var(--borde); background: var(--fondo); }
 #venta-total-box { border: 1px solid var(--borde); }
 
@@ -796,7 +830,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--rosa); backgroun
 .rep-periodos { display: inline-flex; gap: 4px; padding: 4px; background: var(--card); border: 1px solid var(--borde); border-radius: 999px; }
 .rep-periodos .btn-reporte { border: 0; background: transparent; padding: 9px 18px; border-radius: 999px; font-size: 13px; }
 .rep-periodos .btn-reporte:hover { background: var(--blush-claro); color: var(--rosa); }
-.rep-periodos .btn-reporte.active { background: var(--rosa); color: #fff; font-weight: 600; box-shadow: 0 2px 8px rgba(23,74,50,0.22); }
+.rep-periodos .btn-reporte.active { background: var(--rosa); color: #fff; font-weight: 600; box-shadow: 0 2px 8px rgba(31,122,77,0.22); }
 
 #reporte-especifico { align-items: center; gap: 16px; padding: 12px 18px; background: var(--card); border: 1px solid var(--borde); border-radius: var(--radio); margin-bottom: 1rem; }
 #reporte-especifico label { display: flex; align-items: center; gap: 10px; flex: 0 1 auto; min-width: 0; max-width: none; font-size: 13px; font-weight: 500; text-transform: none; letter-spacing: 0; }
@@ -884,7 +918,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--rosa); backgroun
 .neto-et { font-size: 12px; color: var(--texto2); }
 .neto-val { font-family: var(--fuente-titulo); font-size: 32px; font-weight: 600; color: #1B6B43; line-height: 1.15; }
 .neto-val.neg { color: #A32D2D; }
-.neto-card.total { background: var(--rosa); border-color: var(--rosa); box-shadow: 0 6px 18px rgba(23,74,50,0.25); color: #fff; }
+.neto-card.total { background: var(--rosa); border-color: var(--rosa); box-shadow: 0 6px 18px rgba(31,122,77,0.25); color: #fff; }
 .neto-card.total .neto-ico { background: rgba(255,255,255,0.16); }
 .neto-card.total .neto-fila { border-top-color: rgba(255,255,255,0.3); }
 .neto-card.total .neto-fila span { color: var(--rosa-claro); }
